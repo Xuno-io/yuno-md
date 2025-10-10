@@ -54,6 +54,8 @@ class Components(metaclass=ComponentsMeta):
             log_format=configuration.get_configuration('LOG_FORMAT', str),
             log_level=configuration.get_configuration('LOG_LEVEL', str),
         )
+        
+        _logger_instance = logger.get_logger('Components')
 
         # Configure OpenAI client with timeout and retries from configuration
         openai_endpoint: str = configuration.get_configuration(
@@ -67,7 +69,12 @@ class Components(metaclass=ComponentsMeta):
             timeout: httpx.Timeout = httpx.Timeout(timeout_seconds)
         except Exception:
             timeout = timeout_seconds  # type: ignore[assignment]
-
+        
+        _logger_instance.info(
+            f"OpenAI client configured with endpoint: {openai_endpoint}, "
+            f"timeout: {timeout}, max_retries: {max_retries}"
+        )
+        
         openai_client: OpenAI = OpenAI(
             base_url=openai_endpoint,
             timeout=timeout, max_retries=max_retries)

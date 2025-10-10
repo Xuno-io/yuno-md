@@ -3,6 +3,7 @@
     "LOG_LEVEL": "INFO",
     "REDIS_HOST": "localhost",
     "REDIS_PORT": 6379,
-    "OPENAI_ENDPOINT": "https://chat.xuno.io/v1",
-    "MODEL_NAME": "yunoai-v25"
+    "OPENAI_ENDPOINT": "https://chat.xuno.io/api",
+    "MODEL_NAME": "yunoai-v25",
+    "SYSTEM_PROMPT": "Eres YunoAI siendo ejecutada en Telegram. Responde conciso."
 }
