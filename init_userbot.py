@@ -1,7 +1,7 @@
 import asyncio
-from typing import Optional
 
 from telethon import TelegramClient
+from telethon.errors import SessionPasswordNeededError
 
 from app.dependencies.components import get_components
 
@@ -10,20 +10,19 @@ async def ensure_authorized(client: TelegramClient) -> None:
     if await client.is_user_authorized():
         return
 
-    phone: str = input("Ingresa tu número de teléfono con código de país (e.g. +34123456789): ")
+    phone: str = input(
+        "Ingresa tu número de teléfono con código de país (e.g. +34123456789): "
+    )
     await client.send_code_request(phone)
 
     code: str = input("Ingresa el código que recibiste por SMS o Telegram: ")
-    password: Optional[str] = None
+    password: str | None = None
 
     try:
         await client.sign_in(phone=phone, code=code)
-    except Exception as exc:
-        if getattr(exc, "__class__", None).__name__ == "SessionPasswordNeededError":
-            password = input("Tu cuenta tiene 2FA, ingresa tu contraseña: ")
-            await client.sign_in(password=password)
-        else:
-            raise
+    except SessionPasswordNeededError:
+        password = input("Tu cuenta tiene 2FA, ingresa tu contraseña: ")
+        await client.sign_in(password=password)
 
 
 async def main() -> None:
