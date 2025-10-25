@@ -1,5 +1,5 @@
 from app.dependencies.components import get_components
-from app.services.NeibotService.neibot_service import NeibotServiceInterface
+from app.services.NeibotService.neibot_service_interface import NeibotServiceInterface
 from app.services.TelegramService.telegram_service_interface import (
     TelegramServiceInterface,
 )
