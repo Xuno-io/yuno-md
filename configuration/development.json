@@ -3,6 +3,6 @@
     "LOG_LEVEL": "INFO",
     "REDIS_HOST": "localhost",
     "REDIS_PORT": 6379,
-    "OPENAI_ENDPOINT": "https://chat.xuno.io/v1",
+    "OPENAI_ENDPOINT": "https://chat.xuno.io/api",
     "MODEL_NAME": "yunoai-v25"
 }

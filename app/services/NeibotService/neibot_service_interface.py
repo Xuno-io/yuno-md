@@ -1,6 +1,9 @@
-from abc import ABC
-from typing import List, Tuple
+from abc import ABC, abstractmethod
+
+from app.entities.message import MessagePayload
+
 
 class NeibotServiceInterface(ABC):
-    def get_response(self, history: List[Tuple[str,str]]) -> str:
-        raise NotImplementedError("This method should be overridden by subclasses.")
+    @abstractmethod
+    def get_response(self, history: list[MessagePayload]) -> str:
+        """Return the assistant reply for the provided conversation history."""
