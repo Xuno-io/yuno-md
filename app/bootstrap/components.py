@@ -47,7 +47,7 @@ class Components(metaclass=ComponentsMeta):
         self.__components: dict[type[Any], Any] = self.__bootstrap_components()
 
     def __bootstrap_components(self) -> dict[type[Any], Any]:
-        if self.__env == "development":
+        if self.__env in {"development", "staging", "production"}:
             return self.__get_dev_components()
 
         raise ValueError(f"Invalid environment: {self.__env}")

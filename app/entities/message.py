@@ -1,7 +1,7 @@
 from typing import TypedDict, Literal
 
 
-class ImageAttachment(TypedDict, total=False):
+class ImageAttachment(TypedDict):
     """Binary image payload encoded as base64."""
 
     base64: str

@@ -59,4 +59,4 @@ repos:
         entry: pytest
         language: system
         pass_filenames: false
-        args: ["--cov=src", "--cov-report=term-missing"]
+        args: ["--cov=app", "--cov-report=term-missing"]
