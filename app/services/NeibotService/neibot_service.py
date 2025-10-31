@@ -73,12 +73,11 @@ class NeibotService(NeibotServiceInterface):
 
     @staticmethod
     def _build_image_part(attachment: ImageAttachment) -> dict[str, Any]:
-        # The tests and the expected multimodal message format require an
-        # "input_image" part with the base64 payload and mime type as fields.
-        # Keep the shape as simple dict fields so unit tests and any
-        # downstream consumer relying on this structure continue to work.
+        # Build the correct OpenAI Vision API format for images.
+        # Images must be sent as data URLs with the base64 payload.
+        mime_type = attachment.get("mime_type", "image/png")
+        base64_data = attachment.get("base64")
         return {
-            "type": "input_image",
-            "image_base64": attachment.get("base64"),
-            "mime_type": attachment.get("mime_type"),
+            "type": "image_url",
+            "image_url": {"url": f"data:{mime_type};base64,{base64_data}"},
         }

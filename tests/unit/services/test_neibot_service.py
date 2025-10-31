@@ -65,7 +65,6 @@ def test_get_response_builds_multimodal_messages(
     assert user_message["role"] == "user"
     assert user_message["content"][0]["type"] == "text"
     assert user_message["content"][1] == {
-        "type": "input_image",
-        "image_base64": "ZmFrZWltYWdl",
-        "mime_type": "image/png",
+        "type": "image_url",
+        "image_url": {"url": "data:image/png;base64,ZmFrZWltYWdl"},
     }
