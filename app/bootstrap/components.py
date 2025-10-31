@@ -11,10 +11,10 @@ from xuno_components.configuration.configuration import Configuration
 from xuno_components.configuration.configuration_interface import ConfigurationInterface
 from xuno_components.logger.logger import Logger
 from xuno_components.logger.logger_interface import LoggerInterface
-from openai import OpenAI
+#from openai import OpenAI
 from telethon import TelegramClient
 from dotenv import load_dotenv
-
+from langfuse.openai import OpenAI
 load_dotenv()
 
 
@@ -83,6 +83,7 @@ class Components(metaclass=ComponentsMeta):
             f"OpenAI client configured with endpoint: {openai_endpoint}, "
             f"timeout: {timeout}, max_retries: {max_retries}"
         )
+        
         openai_client: OpenAI = OpenAI(
             base_url=openai_endpoint, timeout=timeout, max_retries=max_retries
         )
@@ -105,6 +106,7 @@ class Components(metaclass=ComponentsMeta):
             or True
         )
 
+        """
         redis_cache: CacheInterface = RedisCache(
             host=configuration.get_configuration("REDIS_HOST", str),
             port=configuration.get_configuration("REDIS_PORT", int),
@@ -114,6 +116,7 @@ class Components(metaclass=ComponentsMeta):
             socket_timeout=redis_socket_timeout,
             retry_on_timeout=redis_retry_on_timeout,
         )
+        """
 
         # Telegram client setup
         telegram_api_id: int = configuration.get_configuration("TELEGRAM_API_ID", int)
@@ -129,7 +132,7 @@ class Components(metaclass=ComponentsMeta):
             ConfigurationInterface: configuration,
             OpenAI: openai_client,
             LoggerInterface: logger,
-            CacheInterface: redis_cache,
+            CacheInterface: None,  # redis_cache (temporarily disabled),
             TelegramClient: telegram_client,
         }
 
