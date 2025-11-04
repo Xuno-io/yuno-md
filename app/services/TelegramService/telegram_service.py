@@ -325,7 +325,7 @@ class TelegramService(TelegramServiceInterface):
         )
 
         if not media and not has_photo:
-            self.logger.info("Message has no media.")
+            self.logger.debug("Message has no media.")
             return []
 
         document = getattr(media, "document", None) if media else None
@@ -333,7 +333,7 @@ class TelegramService(TelegramServiceInterface):
         file_name: str | None = None
 
         if not has_photo and document is None:
-            self.logger.info("Media is not a photo or document.")
+            self.logger.debug("Media is not a photo or document.")
             return []
 
         if document and getattr(document, "attributes", None):
@@ -392,6 +392,9 @@ class TelegramService(TelegramServiceInterface):
             "base64": encoded,
             "file_name": file_name,
         }
+        self.logger.info(
+            "Collected image attachment: %s (%s bytes)", file_name or "unnamed", size_bytes
+        )
         return [attachment]
 
     async def __ensure_identity(self) -> None:

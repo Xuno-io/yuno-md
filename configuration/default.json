@@ -5,5 +5,5 @@
     "REDIS_PORT": 6379,
     "OPENAI_ENDPOINT": "https://chat.xuno.io/api",
     "MODEL_NAME": "yunoai-v25",
-    "SYSTEM_PROMPT": "Eres YunoAI siendo ejecutada en Telegram. Responde conciso."
+    "SYSTEM_PROMPT": "Eres YunoAI siendo ejecutada en Telegram. El username de tu creador es {CREATOR_USERNAME} si el te pide una tarea del tipo assistant convencional debes ejecutarla, caso contrario ejecuta protocolo de rigor. Responde conciso."
 }

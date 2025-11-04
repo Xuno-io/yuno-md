@@ -24,7 +24,7 @@ class NeibotService(NeibotServiceInterface):
         self.system_prompt: str = system_prompt
 
         self.logger.info(f"NeibotService initialized with model: {self.model_name}")
-        self.logger.info(f"System prompt: {self.system_prompt}")
+        self.logger.info("System prompt loaded for NeibotService.")
 
     def get_response(self, history: list[MessagePayload]) -> str:
         conversation: list[dict[str, Any]] = [
@@ -73,12 +73,16 @@ class NeibotService(NeibotServiceInterface):
 
     @staticmethod
     def _build_image_part(attachment: ImageAttachment) -> dict[str, Any]:
-        # The tests and the expected multimodal message format require an
-        # "input_image" part with the base64 payload and mime type as fields.
-        # Keep the shape as simple dict fields so unit tests and any
-        # downstream consumer relying on this structure continue to work.
+        # Build the correct OpenAI Vision API format for images.
+        # Images must be sent as data URLs with the base64 payload.
+        mime_type = attachment.get("mime_type", "image/png")
+        base64_data = attachment.get("base64")
+        if not isinstance(base64_data, str) or not base64_data.strip():
+            file_name = attachment.get("file_name") or "<unknown>"
+            raise ValueError(
+                f"Image attachment '{file_name}' is missing a base64 payload."
+            )
         return {
-            "type": "input_image",
-            "image_base64": attachment.get("base64"),
-            "mime_type": attachment.get("mime_type"),
+            "type": "image_url",
+            "image_url": {"url": f"data:{mime_type};base64,{base64_data}"},
         }
