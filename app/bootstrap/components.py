@@ -71,6 +71,8 @@ def _validate_otel_env_vars() -> None:
             credentials = f"{langfuse_public_key}:{langfuse_secret_key}"
             encoded_credentials = base64.b64encode(credentials.encode()).decode()
             otel_headers = f"Authorization=Basic {encoded_credentials}"
+            # Persist the generated header to environment for downstream consumers
+            os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = otel_headers
 
     if not otel_endpoint:
         raise RuntimeError(
