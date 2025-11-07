@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import logging
 from io import BytesIO
@@ -139,7 +138,7 @@ class TelegramService(TelegramServiceInterface):
         )
 
         async with self.bot.action(event.chat_id, "typing"):
-            response: str = await asyncio.to_thread(self.neibot.get_response, history)
+            response: str = await self.neibot.get_response(history)
 
         await event.reply(response)
 
@@ -393,7 +392,9 @@ class TelegramService(TelegramServiceInterface):
             "file_name": file_name,
         }
         self.logger.info(
-            "Collected image attachment: %s (%s bytes)", file_name or "unnamed", size_bytes
+            "Collected image attachment: %s (%s bytes)",
+            file_name or "unnamed",
+            size_bytes,
         )
         return [attachment]
 

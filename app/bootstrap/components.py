@@ -6,16 +6,25 @@ from typing import Any, TypeVar, cast
 import httpx
 
 from xuno_components.cache.cache_interface import CacheInterface
-from xuno_components.cache.redis_cache import RedisCache
 from xuno_components.configuration.configuration import Configuration
 from xuno_components.configuration.configuration_interface import ConfigurationInterface
 from xuno_components.logger.logger import Logger
 from xuno_components.logger.logger_interface import LoggerInterface
-#from openai import OpenAI
+
+# from openai import OpenAI
 from telethon import TelegramClient
 from dotenv import load_dotenv
 from langfuse.openai import OpenAI
+
+# DSPy Langfuse instrumentation
+from openinference.instrumentation.dspy import DSPyInstrumentor
+import dspy
+
 load_dotenv()
+
+# Initialize DSPy instrumentation for Langfuse tracing
+# This must happen before any DSPy modules are created
+DSPyInstrumentor().instrument()
 
 
 T = TypeVar("T")
@@ -83,7 +92,7 @@ class Components(metaclass=ComponentsMeta):
             f"OpenAI client configured with endpoint: {openai_endpoint}, "
             f"timeout: {timeout}, max_retries: {max_retries}"
         )
-        
+
         openai_client: OpenAI = OpenAI(
             base_url=openai_endpoint, timeout=timeout, max_retries=max_retries
         )
@@ -104,6 +113,20 @@ class Components(metaclass=ComponentsMeta):
                 "REDIS_RETRY_ON_TIMEOUT", bool, default=True
             )
             or True
+        )
+
+        lm: dspy.LM = dspy.LM(
+            model="openai/" + configuration.get_configuration("MODEL_NAME", str),
+            api_base=configuration.get_configuration("OPENAI_ENDPOINT", str),
+            api_key=os.getenv("OPENAI_API_KEY", "").strip(),
+            temperature=float(
+                configuration.get_configuration("DSPY_TEMPERATURE", float, default=0.7)
+                or 0.7
+            ),
+            max_tokens=int(
+                configuration.get_configuration("DSPY_MAX_TOKENS", int, default=8192)
+                or 8192
+            ),
         )
 
         """
@@ -134,6 +157,7 @@ class Components(metaclass=ComponentsMeta):
             LoggerInterface: logger,
             CacheInterface: None,  # redis_cache (temporarily disabled),
             TelegramClient: telegram_client,
+            dspy.LM: lm,
         }
 
         return components

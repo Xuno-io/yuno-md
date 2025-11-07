@@ -29,9 +29,13 @@ xuno-components = {version = "*", source = "xuno"}
 redis = "5.2.1"
 telethon = "^1.41.2"
 langfuse = "^3.8.1"
+dspy = "^3.0.3"
+openinference-instrumentation-dspy = "^0.1.19"
+pillow = "^12.0.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "7.4.4"
+pytest-asyncio = "^0.23.0"
 pytest-mock = "^3.14.0"
 pytest-cov = "^3.0.0"
 black = "^23.0.0"

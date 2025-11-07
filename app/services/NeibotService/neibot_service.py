@@ -26,7 +26,7 @@ class NeibotService(NeibotServiceInterface):
         self.logger.info(f"NeibotService initialized with model: {self.model_name}")
         self.logger.info("System prompt loaded for NeibotService.")
 
-    def get_response(self, history: list[MessagePayload]) -> str:
+    async def get_response(self, history: list[MessagePayload]) -> str:
         conversation: list[dict[str, Any]] = [
             {
                 "role": "system",

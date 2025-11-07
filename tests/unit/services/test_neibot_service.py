@@ -37,7 +37,7 @@ def neibot_service(openai_client: DummyOpenAIClient) -> NeibotService:
     )
 
 
-def test_get_response_builds_multimodal_messages(
+async def test_get_response_builds_multimodal_messages(
     neibot_service: NeibotService, openai_client: DummyOpenAIClient
 ) -> None:
     history: list[MessagePayload] = [
@@ -55,7 +55,7 @@ def test_get_response_builds_multimodal_messages(
         }
     ]
 
-    result = neibot_service.get_response(history)
+    result = await neibot_service.get_response(history)
 
     assert result == "ok"
     assert openai_client.last_messages is not None
