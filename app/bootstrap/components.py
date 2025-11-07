@@ -88,6 +88,14 @@ class Components(metaclass=ComponentsMeta):
             timeout: httpx.Timeout = httpx.Timeout(timeout_seconds)
         except Exception:
             timeout = timeout_seconds  # type: ignore[assignment]
+        # Retrieve and validate OpenAI API key before creating clients
+        openai_api_key: str = os.getenv("OPENAI_API_KEY", "").strip()
+        if not openai_api_key:
+            raise RuntimeError(
+                "OPENAI_API_KEY environment variable is not set or is empty. "
+                "Please set the OPENAI_API_KEY environment variable with a valid API key."
+            )
+
         _logger_instance.info(
             f"OpenAI client configured with endpoint: {openai_endpoint}, "
             f"timeout: {timeout}, max_retries: {max_retries}"
@@ -118,7 +126,7 @@ class Components(metaclass=ComponentsMeta):
         lm: dspy.LM = dspy.LM(
             model="openai/" + configuration.get_configuration("MODEL_NAME", str),
             api_base=configuration.get_configuration("OPENAI_ENDPOINT", str),
-            api_key=os.getenv("OPENAI_API_KEY", "").strip(),
+            api_key=openai_api_key,
             temperature=float(
                 configuration.get_configuration("DSPY_TEMPERATURE", float, default=0.7)
                 or 0.7
