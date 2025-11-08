@@ -5,5 +5,5 @@ from app.entities.message import MessagePayload
 
 class NeibotServiceInterface(ABC):
     @abstractmethod
-    def get_response(self, history: list[MessagePayload]) -> str:
+    async def get_response(self, history: list[MessagePayload]) -> str:
         """Return the assistant reply for the provided conversation history."""

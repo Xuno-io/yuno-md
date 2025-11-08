@@ -6,16 +6,96 @@ from typing import Any, TypeVar, cast
 import httpx
 
 from xuno_components.cache.cache_interface import CacheInterface
-from xuno_components.cache.redis_cache import RedisCache
 from xuno_components.configuration.configuration import Configuration
 from xuno_components.configuration.configuration_interface import ConfigurationInterface
 from xuno_components.logger.logger import Logger
 from xuno_components.logger.logger_interface import LoggerInterface
-#from openai import OpenAI
+
+# from openai import OpenAI
 from telethon import TelegramClient
 from dotenv import load_dotenv
 from langfuse.openai import OpenAI
+
+# DSPy Langfuse instrumentation
+from openinference.instrumentation.dspy import DSPyInstrumentor
+import dspy
+
 load_dotenv()
+
+
+def _is_test_environment() -> bool:
+    """
+    Check if we are running in a test environment.
+
+    Returns:
+        True if running under pytest or if TESTING env var is set, False otherwise.
+    """
+    import sys
+
+    # Check if pytest is in sys.modules (most reliable)
+    if any("pytest" in str(module) for module in sys.modules.keys()):
+        return True
+
+    # Check if pytest is in the command line arguments
+    if any("pytest" in arg for arg in sys.argv):
+        return True
+
+    # Check for TESTING environment variable
+    if os.getenv("TESTING", "").lower() in ("true", "1", "yes"):
+        return True
+
+    return False
+
+
+def _validate_otel_env_vars() -> None:
+    """
+    Validate OpenTelemetry/Langfuse environment variables required for DSPy instrumentation.
+
+    Checks for OTEL_EXPORTER_OTLP_ENDPOINT and OTEL_EXPORTER_OTLP_HEADERS.
+    If headers are not provided directly, attempts to build them from LANGFUSE_PUBLIC_KEY
+    and LANGFUSE_SECRET_KEY using Basic authentication.
+
+    Raises:
+        RuntimeError: If required environment variables are missing or empty.
+    """
+    import base64
+
+    otel_endpoint: str = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
+    otel_headers: str = os.getenv("OTEL_EXPORTER_OTLP_HEADERS", "").strip()
+
+    # Optionally build headers from Langfuse keys if not provided directly
+    if not otel_headers:
+        langfuse_public_key: str = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
+        langfuse_secret_key: str = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
+        if langfuse_public_key and langfuse_secret_key:
+            credentials = f"{langfuse_public_key}:{langfuse_secret_key}"
+            encoded_credentials = base64.b64encode(credentials.encode()).decode()
+            otel_headers = f"Authorization=Basic {encoded_credentials}"
+            # Persist the generated header to environment for downstream consumers
+            os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = otel_headers
+
+    if not otel_endpoint:
+        raise RuntimeError(
+            "OTEL_EXPORTER_OTLP_ENDPOINT environment variable is not set or is empty. "
+            "Please set the OTEL_EXPORTER_OTLP_ENDPOINT environment variable with a valid OTLP endpoint URL."
+        )
+
+    if not otel_headers:
+        raise RuntimeError(
+            "OTEL_EXPORTER_OTLP_HEADERS environment variable is not set or is empty, "
+            "and LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY are not available to build headers. "
+            "Please set either OTEL_EXPORTER_OTLP_HEADERS directly (e.g., 'Authorization=Basic <base64_credentials>') "
+            "or provide LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY to build the headers automatically."
+        )
+
+
+# Validate OpenTelemetry/Langfuse environment variables before instrumentation
+# Skip validation and instrumentation in test environment
+if not _is_test_environment():
+    _validate_otel_env_vars()
+    # Initialize DSPy instrumentation for Langfuse tracing
+    # This must happen before any DSPy modules are created
+    DSPyInstrumentor().instrument()
 
 
 T = TypeVar("T")
@@ -79,11 +159,19 @@ class Components(metaclass=ComponentsMeta):
             timeout: httpx.Timeout = httpx.Timeout(timeout_seconds)
         except Exception:
             timeout = timeout_seconds  # type: ignore[assignment]
+        # Retrieve and validate OpenAI API key before creating clients
+        openai_api_key: str = os.getenv("OPENAI_API_KEY", "").strip()
+        if not openai_api_key:
+            raise RuntimeError(
+                "OPENAI_API_KEY environment variable is not set or is empty. "
+                "Please set the OPENAI_API_KEY environment variable with a valid API key."
+            )
+
         _logger_instance.info(
             f"OpenAI client configured with endpoint: {openai_endpoint}, "
             f"timeout: {timeout}, max_retries: {max_retries}"
         )
-        
+
         openai_client: OpenAI = OpenAI(
             base_url=openai_endpoint, timeout=timeout, max_retries=max_retries
         )
@@ -104,6 +192,25 @@ class Components(metaclass=ComponentsMeta):
                 "REDIS_RETRY_ON_TIMEOUT", bool, default=True
             )
             or True
+        )
+
+        # Retrieve configuration values and handle None explicitly to preserve zero values
+        temp_val = configuration.get_configuration(
+            "DSPY_TEMPERATURE", float, default=0.7
+        )
+        temperature = float(temp_val if temp_val is not None else 0.7)
+
+        max_tokens_val = configuration.get_configuration(
+            "DSPY_MAX_TOKENS", int, default=8192
+        )
+        max_tokens = int(max_tokens_val if max_tokens_val is not None else 8192)
+
+        lm: dspy.LM = dspy.LM(
+            model="openai/" + configuration.get_configuration("MODEL_NAME", str),
+            api_base=configuration.get_configuration("OPENAI_ENDPOINT", str),
+            api_key=openai_api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
 
         """
@@ -134,6 +241,7 @@ class Components(metaclass=ComponentsMeta):
             LoggerInterface: logger,
             CacheInterface: None,  # redis_cache (temporarily disabled),
             TelegramClient: telegram_client,
+            dspy.LM: lm,
         }
 
         return components
