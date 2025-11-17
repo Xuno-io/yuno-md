@@ -45,14 +45,23 @@ def _is_test_environment() -> bool:
 
 def _validate_otel_env_vars() -> None:
     """
-    Validate OpenTelemetry/Langfuse environment variables required for DSPy instrumentation.
+    Validate OpenTelemetry/Langfuse environment variables for DSPy instrumentation.
 
-    Checks for OTEL_EXPORTER_OTLP_ENDPOINT and OTEL_EXPORTER_OTLP_HEADERS.
-    If headers are not provided directly, attempts to build them from LANGFUSE_PUBLIC_KEY
-    and LANGFUSE_SECRET_KEY using Basic authentication.
+    This function checks for the necessary environment variables to configure
+    OpenTelemetry for Langfuse tracing. It supports two configuration paths:
+
+    1.  **Langfuse Native Integration:** If `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`,
+        and `LANGFUSE_BASE_URL` are all set, validation is skipped, assuming
+        a direct Langfuse integration is being used.
+
+    2.  **Manual OpenTelemetry Configuration:** If the Langfuse variables are not
+        fully provided, the function requires `OTEL_EXPORTER_OTLP_ENDPOINT` and
+        `OTEL_EXPORTER_OTLP_HEADERS` to be set for manual OTLP export.
 
     Raises:
-        RuntimeError: If required environment variables are missing or empty.
+        RuntimeError: If the required environment variables for manual OpenTelemetry
+                      configuration are missing or empty when Langfuse native
+                      integration variables are not provided.
     """
     import base64
 
