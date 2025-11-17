@@ -16,7 +16,6 @@ from langfuse import observe
 from PIL import Image
 from io import BytesIO
 
-
 class NeibotDSPyService(NeibotServiceInterface):
     """DSPy-powered service for Neibot using YunoAI with Langfuse tracing."""
 
