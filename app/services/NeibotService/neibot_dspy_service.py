@@ -15,9 +15,6 @@ import base64
 from langfuse import observe
 from PIL import Image
 from io import BytesIO
-from openinference.instrumentation.dspy import DSPyInstrumentor
- 
-DSPyInstrumentor().instrument()
 
 class NeibotDSPyService(NeibotServiceInterface):
     """DSPy-powered service for Neibot using YunoAI with Langfuse tracing."""

@@ -163,10 +163,7 @@ class TestComponentsOTELEnvVarsValidation:
         components._validate_otel_env_vars()
 
         # Verify that the header was set in the environment
-        assert "OTEL_EXPORTER_OTLP_HEADERS" in os.environ
-        assert os.environ["OTEL_EXPORTER_OTLP_HEADERS"].startswith(
-            "Authorization=Basic "
-        )
+        assert "OTEL_EXPORTER_OTLP_HEADERS" not in os.environ
 
     def test_otel_validation_prefers_direct_headers_over_keys(self, monkeypatch):
         """Test that OTEL validation prefers direct headers over Langfuse keys."""

@@ -31,11 +31,7 @@ def _is_test_environment() -> bool:
         True if running under pytest or if TESTING env var is set, False otherwise.
     """
     import sys
-
-    # Check if pytest is in sys.modules (most reliable)
-    if any("pytest" in str(module) for module in sys.modules.keys()):
-        return True
-
+    
     # Check if pytest is in the command line arguments
     if any("pytest" in arg for arg in sys.argv):
         return True
@@ -64,15 +60,12 @@ def _validate_otel_env_vars() -> None:
     otel_headers: str = os.getenv("OTEL_EXPORTER_OTLP_HEADERS", "").strip()
 
     # Optionally build headers from Langfuse keys if not provided directly
-    if not otel_headers:
-        langfuse_public_key: str = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
-        langfuse_secret_key: str = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
-        if langfuse_public_key and langfuse_secret_key:
-            credentials = f"{langfuse_public_key}:{langfuse_secret_key}"
-            encoded_credentials = base64.b64encode(credentials.encode()).decode()
-            otel_headers = f"Authorization=Basic {encoded_credentials}"
-            # Persist the generated header to environment for downstream consumers
-            os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = otel_headers
+    langfuse_public_key: str = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
+    langfuse_secret_key: str = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
+    langfuse_base_url: str = os.getenv("LANGFUSE_BASE_URL").strip()
+    
+    if langfuse_public_key and langfuse_secret_key and langfuse_base_url:
+        return # Skip validation if Langfuse integration is used
 
     if not otel_endpoint:
         raise RuntimeError(
