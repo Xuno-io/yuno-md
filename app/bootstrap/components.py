@@ -62,7 +62,7 @@ def _validate_otel_env_vars() -> None:
     # Optionally build headers from Langfuse keys if not provided directly
     langfuse_public_key: str = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
     langfuse_secret_key: str = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
-    langfuse_base_url: str = os.getenv("LANGFUSE_BASE_URL").strip()
+    langfuse_base_url: str = os.getenv("LANGFUSE_BASE_URL", "").strip()
     
     if langfuse_public_key and langfuse_secret_key and langfuse_base_url:
         return # Skip validation if Langfuse integration is used
