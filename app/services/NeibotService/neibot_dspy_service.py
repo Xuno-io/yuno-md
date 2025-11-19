@@ -59,11 +59,22 @@ class NeibotDSPyService(NeibotServiceInterface):
         """
         try:
             # Build context from history (includes text and image descriptions)
-            context = await self._build_context(history)
+            # Exclude the last message as it is passed separately as 'question'
+            context = await self._build_context(history[:-1])
 
             # Get the last message as the current question
             current_message = history[-1] if history else None
             question = current_message.get("content", "") if current_message else ""
+
+            # Add attachments from the current message to context
+            # We excluded the text above (to be 'question'), but we need the images in 'context'
+            if current_message and current_message.get("attachments"):
+                for attachment in current_message["attachments"]:
+                    base64_data = attachment["base64"]
+                    pil_image = Image.open(BytesIO(base64.b64decode(base64_data)))
+                    image = dspy.Image.from_PIL(pil_image)
+                    context_line = MessageSignature(content=image)
+                    context.append(context_line)
 
             # Use DSPy to generate response
             # Execute the synchronous DSPy call in a thread pool to avoid blocking the event loop
