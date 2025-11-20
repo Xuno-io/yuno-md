@@ -4,6 +4,7 @@ import logging
 from types import SimpleNamespace
 
 import pytest
+from typing import cast
 
 from app.entities.message import ImageAttachment, MessagePayload
 
@@ -13,6 +14,9 @@ from app.services.TelegramService.telegram_service import (
     ImageTooLargeError,
     TelegramService,
     UnsupportedImageError,
+)
+from app.repositories.chat_repository.chat_repository_interface import (
+    ChatRepositoryInterface,
 )
 
 
@@ -55,11 +59,22 @@ class StubMessage:
 
 @pytest.fixture
 def telegram_service() -> TelegramService:
+    # Provide simple stubs for chat_repository and admin_ids required by the
+    # updated TelegramService constructor.
+    chat_repo = cast(
+        ChatRepositoryInterface,
+        SimpleNamespace(
+            get_model=lambda chat_id: None,
+            set_model=lambda chat_id, model: None,
+        ),
+    )
     return TelegramService(
         command_prefix="/cmd",
         neibot=DummyNeibot(),
         telegram_client=SimpleNamespace(),
         logger=logging.getLogger("TelegramServiceTest"),
+        chat_repository=chat_repo,
+        admin_ids=[123],
     )
 
 
