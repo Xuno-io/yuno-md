@@ -21,7 +21,9 @@ from app.repositories.chat_repository.chat_repository_interface import (
 
 
 class DummyNeibot(NeibotServiceInterface):
-    def get_response(self, history):
+    async def get_response(
+        self, history: list[MessagePayload], model_name: str | None = None
+    ) -> str:
         raise NotImplementedError
 
 
