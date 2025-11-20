@@ -4,6 +4,6 @@
     "REDIS_HOST": "localhost",
     "REDIS_PORT": 6379,
     "OPENAI_ENDPOINT": "https://chat.xuno.io/api",
-    "MODEL_NAME": "yunoai-v25",
+    "MODEL_NAME": "yunoai-v3-preview",
     "SQLITE_DB_PATH": "neibot_database.sqlite"
 }
