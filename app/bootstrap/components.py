@@ -5,11 +5,12 @@ from typing import Any, TypeVar, cast
 
 import httpx
 
-from xuno_components.cache.cache_interface import CacheInterface
 from xuno_components.configuration.configuration import Configuration
 from xuno_components.configuration.configuration_interface import ConfigurationInterface
 from xuno_components.logger.logger import Logger
 from xuno_components.logger.logger_interface import LoggerInterface
+from xuno_components.database.db_interface import DBInterface
+from app.components.database.sqlite_db import SqliteDB
 
 # from openai import OpenAI
 from telethon import TelegramClient
@@ -31,7 +32,7 @@ def _is_test_environment() -> bool:
         True if running under pytest or if TESTING env var is set, False otherwise.
     """
     import sys
-    
+
     # Check if pytest is in the command line arguments
     if any("pytest" in arg for arg in sys.argv):
         return True
@@ -63,7 +64,6 @@ def _validate_otel_env_vars() -> None:
                       configuration are missing or empty when Langfuse native
                       integration variables are not provided.
     """
-    import base64
 
     otel_endpoint: str = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
     otel_headers: str = os.getenv("OTEL_EXPORTER_OTLP_HEADERS", "").strip()
@@ -72,9 +72,9 @@ def _validate_otel_env_vars() -> None:
     langfuse_public_key: str = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
     langfuse_secret_key: str = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
     langfuse_base_url: str = os.getenv("LANGFUSE_BASE_URL", "").strip()
-    
+
     if langfuse_public_key and langfuse_secret_key and langfuse_base_url:
-        return # Skip validation if Langfuse integration is used
+        return  # Skip validation if Langfuse integration is used
 
     if not otel_endpoint:
         raise RuntimeError(
@@ -177,24 +177,6 @@ class Components(metaclass=ComponentsMeta):
         openai_client: OpenAI = OpenAI(
             base_url=openai_endpoint, timeout=timeout, max_retries=max_retries
         )
-        # Conditional MCP setup based on configuration flag
-        # Redis client timeouts/retry - expose via configuration with safe defaults
-        redis_socket_connect_timeout: float = float(
-            configuration.get_configuration(
-                "REDIS_SOCKET_CONNECT_TIMEOUT", float, default=2.0
-            )
-            or 2.0
-        )  # type: ignore[arg-type]
-        redis_socket_timeout: float = float(
-            configuration.get_configuration("REDIS_SOCKET_TIMEOUT", float, default=5.0)
-            or 5.0
-        )  # type: ignore[arg-type]
-        redis_retry_on_timeout: bool = bool(
-            configuration.get_configuration(
-                "REDIS_RETRY_ON_TIMEOUT", bool, default=True
-            )
-            or True
-        )
 
         # Retrieve configuration values and handle None explicitly to preserve zero values
         temp_val = configuration.get_configuration(
@@ -215,18 +197,6 @@ class Components(metaclass=ComponentsMeta):
             max_tokens=max_tokens,
         )
 
-        """
-        redis_cache: CacheInterface = RedisCache(
-            host=configuration.get_configuration("REDIS_HOST", str),
-            port=configuration.get_configuration("REDIS_PORT", int),
-            db=0,  # Using db 0 for conversation history, mem0 uses default
-            # Pass explicit client-level socket timeouts & retry_on_timeout
-            socket_connect_timeout=redis_socket_connect_timeout,
-            socket_timeout=redis_socket_timeout,
-            retry_on_timeout=redis_retry_on_timeout,
-        )
-        """
-
         # Telegram client setup
         telegram_api_id: int = configuration.get_configuration("TELEGRAM_API_ID", int)
         telegram_api_hash: str = configuration.get_configuration(
@@ -237,13 +207,20 @@ class Components(metaclass=ComponentsMeta):
             "bot", telegram_api_id, telegram_api_hash
         )
 
+        # Database
+        sqlite_db: DBInterface = SqliteDB(
+            db_path=configuration.get_configuration("SQLITE_DB_PATH", str)
+        )
+
+        sqlite_db.connect()
+
         components: dict[type[Any], Any] = {
             ConfigurationInterface: configuration,
             OpenAI: openai_client,
             LoggerInterface: logger,
-            CacheInterface: None,  # redis_cache (temporarily disabled),
             TelegramClient: telegram_client,
             dspy.LM: lm,
+            DBInterface: sqlite_db,
         }
 
         return components

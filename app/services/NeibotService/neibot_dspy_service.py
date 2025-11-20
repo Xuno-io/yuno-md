@@ -16,13 +16,18 @@ from langfuse import observe
 from PIL import Image
 from io import BytesIO
 
+
 class NeibotDSPyService(NeibotServiceInterface):
     """DSPy-powered service for Neibot using YunoAI with Langfuse tracing."""
 
     def __init__(
         self,
         system_prompt: str,
-        lm: dspy.LM,
+        model_name: str,
+        api_key: str,
+        api_base: str,
+        temperature: float,
+        max_tokens: int,
         logger: logging.Logger,
     ) -> None:
         """
@@ -30,21 +35,43 @@ class NeibotDSPyService(NeibotServiceInterface):
 
         Args:
             system_prompt: System instructions and personality
-            lm: Configured DSPy LM instance
+            model_name: Default model name
+            api_key: OpenAI API key
+            api_base: OpenAI API base URL
+            temperature: Model temperature
+            max_tokens: Max tokens for generation
             logger: Logger instance
         """
         self.system_prompt = system_prompt
+        self.model_name = model_name
+        self.api_key = api_key
+        self.api_base = api_base
+        self.temperature = temperature
+        self.max_tokens = max_tokens
         self.logger = logger
-        self.lm = lm
 
-        # Initialize DSPy modules
-        dspy.configure(lm=self.lm)
+        # Initialize default LM
+        self.default_lm = self._create_lm(self.model_name)
+
+        # Initialize DSPy modules with default LM
+        dspy.configure(lm=self.default_lm)
         self.conversation_module = dspy.ChainOfThought(ConversationSignature)
 
         self.logger.info("NeibotDSPyService initialized with DSPy")
 
+    def _create_lm(self, model: str) -> dspy.LM:
+        return dspy.LM(
+            model="openai/" + model,
+            api_base=self.api_base,
+            api_key=self.api_key,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
+
     @observe()
-    async def get_response(self, history: list[MessagePayload]) -> str:
+    async def get_response(
+        self, history: list[MessagePayload], model_name: str | None = None
+    ) -> str:
         """
         Get a response using DSPy with conversation context.
 
@@ -53,11 +80,18 @@ class NeibotDSPyService(NeibotServiceInterface):
 
         Args:
             history: List of MessagePayload objects with role, content, and attachments
+            model_name: Optional model name to override the default
 
         Returns:
             The assistant's response
         """
         try:
+            # Determine which LM to use
+            current_lm = self.default_lm
+            if model_name and model_name != self.model_name:
+                self.logger.info(f"Using custom model {model_name}")
+                current_lm = self._create_lm(model_name)
+
             # Build context from history (includes text and image descriptions)
             # Exclude the last message as it is passed separately as 'question'
             context = await self._build_context(history[:-1])
@@ -79,12 +113,16 @@ class NeibotDSPyService(NeibotServiceInterface):
             # Use DSPy to generate response
             # Execute the synchronous DSPy call in a thread pool to avoid blocking the event loop
             # This allows the typing indicator to remain active during processing
-            result = await asyncio.to_thread(
-                self.conversation_module,
-                system_prompt=self.system_prompt,
-                context=context,
-                question=question,
-            )
+            # Use dspy.context to apply the selected LM
+            def run_dspy():
+                with dspy.context(lm=current_lm):
+                    return self.conversation_module(
+                        system_prompt=self.system_prompt,
+                        context=context,
+                        question=question,
+                    )
+
+            result = await asyncio.to_thread(run_dspy)
 
             # DSPy returns a Prediction object with the output fields
             return result.answer.strip()

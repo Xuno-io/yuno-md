@@ -44,3 +44,8 @@ bot.session
 # OS-specific files
 .DS_Store
 Thumbs.db
+
+# SQlite database files
+*.sqlite
+*.sqlite3
+*.sqlite-journal

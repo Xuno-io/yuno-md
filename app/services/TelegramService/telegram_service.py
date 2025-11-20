@@ -12,6 +12,9 @@ from app.services.NeibotService.neibot_service_interface import NeibotServiceInt
 from app.services.TelegramService.telegram_service_interface import (
     TelegramServiceInterface,
 )
+from app.repositories.chat_repository.chat_repository_interface import (
+    ChatRepositoryInterface,
+)
 
 
 class ImageProcessingError(Exception):
@@ -43,12 +46,16 @@ class TelegramService(TelegramServiceInterface):
         neibot: NeibotServiceInterface,
         telegram_client: TelegramClient,
         logger: logging.Logger,
+        chat_repository: ChatRepositoryInterface,
+        admin_ids: list[int],
     ) -> None:
         self.logger: logging.Logger = logger
         self.neibot: NeibotServiceInterface = neibot
         self.bot: TelegramClient = telegram_client
         self.me: Any | None = None
         self.command_prefix: str = command_prefix
+        self.chat_repository = chat_repository
+        self.admin_ids = admin_ids
 
     @classmethod
     async def create(
@@ -57,6 +64,8 @@ class TelegramService(TelegramServiceInterface):
         neibot: NeibotServiceInterface,
         telegram_client: TelegramClient,
         logger: logging.Logger,
+        chat_repository: ChatRepositoryInterface,
+        admin_ids: list[int],
     ) -> TelegramService:
         """Factory to perform async setup steps before returning the service."""
         service = cls(
@@ -64,6 +73,8 @@ class TelegramService(TelegramServiceInterface):
             neibot=neibot,
             telegram_client=telegram_client,
             logger=logger,
+            chat_repository=chat_repository,
+            admin_ids=admin_ids,
         )
         service.bot.add_event_handler(service._my_event_handler, events.NewMessage)
         return service
@@ -74,6 +85,13 @@ class TelegramService(TelegramServiceInterface):
             return
 
         await self.__ensure_identity()
+
+        raw_message: str = event.raw_text or ""
+
+        # Handle /yuno-model command
+        if raw_message.startswith("/yuno-model"):
+            await self._handle_model_command(event, raw_message)
+            return
 
         message = getattr(event, "message", None) or event
 
@@ -103,7 +121,6 @@ class TelegramService(TelegramServiceInterface):
             )
             return
 
-        raw_message: str = event.raw_text or ""
         if raw_message.startswith(self.command_prefix):
             user_message = raw_message[len(self.command_prefix) :].strip()
         else:
@@ -137,8 +154,13 @@ class TelegramService(TelegramServiceInterface):
             "Constructed payload for Neibot with %s messages in history", len(history)
         )
 
+        # Determine model to use
+        model_name = self.chat_repository.get_model(event.chat_id)
+
         async with self.bot.action(event.chat_id, "typing"):
-            response: str = await self.neibot.get_response(history)
+            response: str = await self.neibot.get_response(
+                history, model_name=model_name
+            )
 
         await event.reply(response)
 
@@ -401,3 +423,32 @@ class TelegramService(TelegramServiceInterface):
     async def __ensure_identity(self) -> None:
         if self.me is None:
             self.me = await self.bot.get_me()
+
+    async def _handle_model_command(self, event, raw_message: str) -> None:
+        try:
+            # Permission: only explicit admin IDs can change the model
+            if event.sender_id not in self.admin_ids:
+                await event.reply(
+                    "Solo los administradores autorizados pueden cambiar el modelo."
+                )
+                return
+
+            parts = raw_message.split()
+
+            # If no argument provided, return the current model for this chat
+            if len(parts) < 2:
+                current = self.chat_repository.get_model(event.chat_id)
+                if current:
+                    await event.reply(f"Modelo actual para este chat: {current}")
+                else:
+                    await event.reply(
+                        "No hay un modelo personalizado para este chat; se usa el modelo global por defecto."
+                    )
+                return
+
+            model_name = parts[1].strip()
+            self.chat_repository.set_model(event.chat_id, model_name)
+            await event.reply(f"Modelo actualizado a: {model_name}")
+        except Exception as e:
+            self.logger.error(f"Error setting model: {e}")
+            await event.reply("Ocurrió un error al actualizar el modelo.")
