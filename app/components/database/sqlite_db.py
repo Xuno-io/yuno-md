@@ -31,13 +31,20 @@ class SqliteDB(DBInterface):
         """
         Execute a query with no return value.
         """
-        if self.cursor is None:
+        if self.cursor is None or self.connection is None:
             raise ConnectionError("Database not connected")
+
+        # Check transaction state before execution to support autocommit for single statements
+        # while respecting explicit transactions started with begin_transaction()
+        in_transaction = self.connection.in_transaction
 
         if params is None:
             self.cursor.execute(query)
         else:
             self.cursor.execute(query, params)
+
+        if not in_transaction:
+            self.connection.commit()
 
     def execute_and_fetch(
         self, query: str, params: tuple | None = None
@@ -45,13 +52,18 @@ class SqliteDB(DBInterface):
         """
         Execute a query and fetch all results as a list of dictionaries.
         """
-        if self.cursor is None:
+        if self.cursor is None or self.connection is None:
             raise ConnectionError("Database not connected")
+
+        in_transaction = self.connection.in_transaction
 
         if params is None:
             self.cursor.execute(query)
         else:
             self.cursor.execute(query, params)
+
+        if not in_transaction:
+            self.connection.commit()
 
         rows = self.cursor.fetchall()
         return [dict(row) for row in rows]
@@ -62,13 +74,18 @@ class SqliteDB(DBInterface):
         """
         Execute a query and fetch a single result as a dictionary.
         """
-        if self.cursor is None:
+        if self.cursor is None or self.connection is None:
             raise ConnectionError("Database not connected")
+
+        in_transaction = self.connection.in_transaction
 
         if params is None:
             self.cursor.execute(query)
         else:
             self.cursor.execute(query, params)
+
+        if not in_transaction:
+            self.connection.commit()
 
         row = self.cursor.fetchone()
         if row:
