@@ -185,11 +185,19 @@ class TelegramService(TelegramServiceInterface):
 
     async def __build_reply_history(self, event) -> list[MessagePayload]:
         history: list[MessagePayload] = []
-        current_event = event
+        current_msg_id = event.reply_to_msg_id
+        chat_id = event.chat_id
 
-        while current_event.reply_to_msg_id:
+        while current_msg_id:
             try:
-                replied_msg = await current_event.get_reply_message()
+                cached = self.chat_repository.get_message(chat_id, current_msg_id)
+                if cached:
+                    history.insert(0, cached["payload"])
+                    current_msg_id = cached["reply_to_msg_id"]
+                    self.logger.debug("Loaded message %s from DB", current_msg_id)
+                    continue
+
+                replied_msg = await self.bot.get_messages(chat_id, ids=current_msg_id)
                 if not replied_msg:
                     break
 
@@ -232,16 +240,20 @@ class TelegramService(TelegramServiceInterface):
                     replied_msg, strict=False
                 )
 
-                history.insert(
-                    0,
-                    {
-                        "role": role,
-                        "content": message_content,
-                        "attachments": attachments,
-                    },
+                payload: MessagePayload = {
+                    "role": role,
+                    "content": message_content,
+                    "attachments": attachments,
+                }
+
+                history.insert(0, payload)
+
+                next_reply_id = replied_msg.reply_to_msg_id
+                self.chat_repository.save_message(
+                    chat_id, current_msg_id, payload, next_reply_id
                 )
 
-                current_event = replied_msg
+                current_msg_id = next_reply_id
 
                 self.logger.debug(
                     "Added message to history: %s - %s...",
