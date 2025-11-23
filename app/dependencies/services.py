@@ -68,6 +68,11 @@ async def get_telegram_service(
         int(id.strip()) for id in admin_ids_str.split(",") if id.strip().isdigit()
     ]
 
+    configuration = components.get_component(ConfigurationInterface)
+    max_history_turns = configuration.get_configuration(
+        "MAX_HISTORY_TURNS", int, default=100
+    )
+
     return await TelegramService.create(
         command_prefix="/yuno",
         neibot=neibot_service,
@@ -75,4 +80,7 @@ async def get_telegram_service(
         logger=components.get_component(LoggerInterface).get_logger("TelegramService"),
         chat_repository=get_chat_repository(components),
         admin_ids=admin_ids,
+        max_history_turns=(
+            int(max_history_turns) if max_history_turns is not None else 50
+        ),
     )

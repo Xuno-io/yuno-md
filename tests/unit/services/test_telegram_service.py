@@ -277,3 +277,19 @@ def test_merge_attachment_lists_deduplicates(
             "file_name": "foto.jpg",
         },
     ]
+
+
+class MockEvent:
+    def __init__(self):
+        self.replied_message = None
+
+    async def reply(self, message):
+        self.replied_message = message
+
+
+def test_handle_help_command(telegram_service: TelegramService) -> None:
+    event = MockEvent()
+    asyncio.run(telegram_service._handle_help_command(event))
+
+    assert "¡Hola! Soy Yuno." in event.replied_message
+    assert "hilos de conversación" in event.replied_message
