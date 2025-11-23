@@ -54,7 +54,7 @@ class TelegramService(TelegramServiceInterface):
         self.neibot: NeibotServiceInterface = neibot
         self.bot: TelegramClient = telegram_client
         self.me: Any | None = None
-        self.command_prefix: str = command_prefix
+        self.command_prefix: str = command_prefix.lower()  # Normalize to lowercase
         self.chat_repository = chat_repository
         self.admin_ids = admin_ids
         self.max_history_turns = max_history_turns

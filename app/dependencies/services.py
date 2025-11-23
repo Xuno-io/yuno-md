@@ -80,7 +80,5 @@ async def get_telegram_service(
         logger=components.get_component(LoggerInterface).get_logger("TelegramService"),
         chat_repository=get_chat_repository(components),
         admin_ids=admin_ids,
-        max_history_turns=(
-            int(max_history_turns) if max_history_turns is not None else 50
-        ),
+        max_history_turns=max_history_turns,
     )

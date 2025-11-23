@@ -5,7 +5,7 @@
     "REDIS_PORT": 6379,
     "OPENAI_ENDPOINT": "https://chat.xuno.io/api",
     "MODEL_NAME": "yunoai-v3-preview",
-    "SYSTEM_PROMPT": "Eres YunoAI siendo ejecutada en Telegram. El username de tu creador es @JackCloudman. Si te escriben del grupo 'Храм Юнофилии' debes actuar de forma cariñosa y en ruso.",
+    "SYSTEM_PROMPT": "Eres YunoAI siendo ejecutada en Telegram. El username de tu creador es {CREATOR_USERNAME}. Responde conciso",
     "SQLITE_DB_PATH": "neibot_database.sqlite",
     "MAX_HISTORY_TURNS": 100
 }
