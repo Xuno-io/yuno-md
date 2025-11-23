@@ -96,15 +96,17 @@ class TelegramService(TelegramServiceInterface):
         await self.__ensure_identity()
 
         raw_message: str = event.raw_text or ""
+        raw_message_stripped = raw_message.strip()
+        raw_message_lower = raw_message_stripped.lower()
 
         # Handle /help command
-        if raw_message.startswith("/help"):
+        if raw_message_lower.startswith("/help"):
             await self._handle_help_command(event)
             return
 
         # Handle /yuno-model command
-        if raw_message.startswith("/yuno-model"):
-            await self._handle_model_command(event, raw_message)
+        if raw_message_lower.startswith("/yuno-model"):
+            await self._handle_model_command(event, raw_message_stripped)
             return
 
         message = getattr(event, "message", None) or event
@@ -135,10 +137,10 @@ class TelegramService(TelegramServiceInterface):
             )
             return
 
-        if raw_message.startswith(self.command_prefix):
-            user_message = raw_message[len(self.command_prefix) :].strip()
+        if raw_message_lower.startswith(self.command_prefix):
+            user_message = raw_message_stripped[len(self.command_prefix) :].strip()
         else:
-            user_message = raw_message.strip()
+            user_message = raw_message_stripped
 
         metadata: str = await self.__build_metadata(event)
 
@@ -313,6 +315,8 @@ class TelegramService(TelegramServiceInterface):
         if message_text.startswith(self.command_prefix):
             return True
         elif message_text.startswith("/help"):
+            return True
+        elif message_text.startswith("/yuno-model"):
             return True
         elif "@yunoaidotcom" in message_text:
             return True
