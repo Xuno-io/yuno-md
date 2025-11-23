@@ -48,14 +48,21 @@ class TelegramService(TelegramServiceInterface):
         logger: logging.Logger,
         chat_repository: ChatRepositoryInterface,
         admin_ids: list[int],
+        max_history_turns: int = 100,
     ) -> None:
         self.logger: logging.Logger = logger
         self.neibot: NeibotServiceInterface = neibot
         self.bot: TelegramClient = telegram_client
         self.me: Any | None = None
-        self.command_prefix: str = command_prefix
+        self.command_prefix: str = command_prefix.lower()  # Normalize to lowercase
         self.chat_repository = chat_repository
         self.admin_ids = admin_ids
+        self.max_history_turns = max_history_turns
+        self.logger.info(
+            "TelegramService initialized with command prefix '%s' and max history turns %s",
+            self.command_prefix,
+            self.max_history_turns,
+        )
 
     @classmethod
     async def create(
@@ -66,6 +73,7 @@ class TelegramService(TelegramServiceInterface):
         logger: logging.Logger,
         chat_repository: ChatRepositoryInterface,
         admin_ids: list[int],
+        max_history_turns: int = 100,
     ) -> TelegramService:
         """Factory to perform async setup steps before returning the service."""
         service = cls(
@@ -75,6 +83,7 @@ class TelegramService(TelegramServiceInterface):
             logger=logger,
             chat_repository=chat_repository,
             admin_ids=admin_ids,
+            max_history_turns=max_history_turns,
         )
         service.bot.add_event_handler(service._my_event_handler, events.NewMessage)
         return service
@@ -87,10 +96,17 @@ class TelegramService(TelegramServiceInterface):
         await self.__ensure_identity()
 
         raw_message: str = event.raw_text or ""
+        raw_message_stripped = raw_message.strip()
+        raw_message_lower = raw_message_stripped.lower()
+
+        # Handle /help command
+        if raw_message_lower.startswith("/help"):
+            await self._handle_help_command(event)
+            return
 
         # Handle /yuno-model command
-        if raw_message.startswith("/yuno-model"):
-            await self._handle_model_command(event, raw_message)
+        if raw_message_lower.startswith("/yuno-model"):
+            await self._handle_model_command(event, raw_message_stripped)
             return
 
         message = getattr(event, "message", None) or event
@@ -121,14 +137,25 @@ class TelegramService(TelegramServiceInterface):
             )
             return
 
-        if raw_message.startswith(self.command_prefix):
-            user_message = raw_message[len(self.command_prefix) :].strip()
+        if raw_message_lower.startswith(self.command_prefix):
+            user_message = raw_message_stripped[len(self.command_prefix) :].strip()
         else:
-            user_message = raw_message.strip()
+            user_message = raw_message_stripped
 
         metadata: str = await self.__build_metadata(event)
 
         history: list[MessagePayload] = await self.__build_reply_history(event)
+
+        if len(history) >= self.max_history_turns:
+            self.logger.warning(
+                "Conversation history limit reached (%s). Rejecting request.",
+                self.max_history_turns,
+            )
+
+            await event.reply(
+                message=f"La conversación ha alcanzado el límite de {self.max_history_turns} mensajes. Por favor, inicia un nuevo hilo o discusión.",
+            )
+            return
 
         context_texts, history_attachments = self._extract_referenced_messages(history)
         attachments = self._merge_attachment_lists(history_attachments, attachments)
@@ -189,6 +216,13 @@ class TelegramService(TelegramServiceInterface):
         chat_id = event.chat_id
 
         while current_msg_id:
+            if len(history) >= self.max_history_turns:
+                self.logger.warning(
+                    "Reached max history turns (%s). Stopping fetch.",
+                    self.max_history_turns,
+                )
+                break
+
             try:
                 cached = self.chat_repository.get_message(chat_id, current_msg_id)
                 if cached:
@@ -277,7 +311,14 @@ class TelegramService(TelegramServiceInterface):
 
     async def _should_respond(self, event) -> bool:
         message_text = event.raw_text or ""
+        message_text = message_text.strip().lower()
         if message_text.startswith(self.command_prefix):
+            return True
+        elif message_text.startswith("/help"):
+            return True
+        elif message_text.startswith("/yuno-model"):
+            return True
+        elif "@yunoaidotcom" in message_text:
             return True
 
         if event.reply_to_msg_id:
@@ -435,6 +476,20 @@ class TelegramService(TelegramServiceInterface):
     async def __ensure_identity(self) -> None:
         if self.me is None:
             self.me = await self.bot.get_me()
+
+    async def _handle_help_command(self, event) -> None:
+        """Sends a help message explaining how to use the bot."""
+        help_message = (
+            "¡Hola! Soy Yuno. 🧠\n\n"
+            "Funciono mediante **hilos de conversación** (threads). "
+            "Para mantener el contexto y continuar nuestra charla, es necesario que "
+            "**respondas a mi último mensaje** (Reply).\n\n"
+            f"Para iniciar una conversación escribe: {self.command_prefix} seguido de tu mensaje.\n\n"
+            "Por ejemplo:\n"
+            f"`{self.command_prefix} tengo esta idea y me gustaria que la pongas a prueba`\n\n"
+            "O bien mencionando @yunoaidotcom en tu mensaje.\n\n"
+        )
+        await event.reply(help_message)
 
     async def _handle_model_command(self, event, raw_message: str) -> None:
         try:
