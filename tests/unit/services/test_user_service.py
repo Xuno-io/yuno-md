@@ -28,6 +28,10 @@ class TestUserService(unittest.TestCase):
         limit = self.service.get_user_max_history_turns(123)
         self.assertEqual(limit, self.pro_limit)
 
+    def test_set_user_pro_status(self):
+        self.service.set_user_pro_status(123, True)
+        self.mock_repo.set_user_pro_status.assert_called_once_with(123, True)
+
 
 if __name__ == "__main__":
     unittest.main()
