@@ -15,12 +15,15 @@ def mock_client():
 
 @pytest.fixture
 def telegram_service(mock_chat_repo, mock_client):
+    user_service = MagicMock()
+    user_service.get_user_max_history_turns.return_value = 100
     service = TelegramService(
         command_prefix="/cmd",
         neibot=AsyncMock(),
         telegram_client=mock_client,
         logger=MagicMock(),
         chat_repository=mock_chat_repo,
+        user_service=user_service,
         admin_ids=[123],
     )
     service.me = MagicMock()
@@ -36,6 +39,7 @@ async def test_cached_message_does_not_trigger_download(
     event = MagicMock()
     event.reply_to_msg_id = 200
     event.chat_id = 123
+    event.sender_id = 789
 
     # Mock cache hit for 200 with attachments
     cached_payload = {
@@ -73,7 +77,8 @@ async def test_cached_message_does_not_trigger_download(
     mock_client.get_messages.return_value = msg100
 
     # Execute
-    history = await telegram_service._TelegramService__build_reply_history(event)
+    max_history_turns = 100
+    history = await telegram_service._TelegramService__build_reply_history(event, max_history_turns)
 
     # Verify
     assert len(history) == 2

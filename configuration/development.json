@@ -6,5 +6,6 @@
     "OPENAI_ENDPOINT": "https://chat.xuno.io/api",
     "MODEL_NAME": "yunoai-v3-preview",
     "SQLITE_DB_PATH": "neibot_database.sqlite",
-    "MAX_HISTORY_TURNS": 100
+    "MAX_HISTORY_TURNS": 100,
+    "MAX_HISTORY_TURNS_PRO": 200
 }
