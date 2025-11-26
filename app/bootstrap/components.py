@@ -190,7 +190,7 @@ class Components(metaclass=ComponentsMeta):
         max_tokens = int(max_tokens_val if max_tokens_val is not None else 8192)
 
         lm: dspy.LM = dspy.LM(
-            model="openai/" + configuration.get_configuration("MODEL_NAME", str),
+            model=configuration.get_configuration("MODEL_NAME", str),
             api_base=configuration.get_configuration("OPENAI_ENDPOINT", str),
             api_key=openai_api_key,
             temperature=temperature,

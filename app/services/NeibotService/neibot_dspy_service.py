@@ -54,14 +54,14 @@ class NeibotDSPyService(NeibotServiceInterface):
         self.default_lm = self._create_lm(self.model_name)
 
         # Initialize DSPy modules with default LM
-        dspy.configure(lm=self.default_lm, adapter=dspy.JSONAdapter())
+        dspy.configure(lm=self.default_lm)
         self.conversation_module = dspy.ChainOfThought(ConversationSignature)
 
         self.logger.info("NeibotDSPyService initialized with DSPy")
 
     def _create_lm(self, model: str) -> dspy.LM:
         return dspy.LM(
-            model="openai/" + model,
+            model=model,
             api_base=self.api_base,
             api_key=self.api_key,
             temperature=self.temperature,
