@@ -59,6 +59,9 @@ class StubMessage:
         return file
 
 
+from app.services.UserService.user_service_interface import UserServiceInterface
+
+
 @pytest.fixture
 def telegram_service() -> TelegramService:
     # Provide simple stubs for chat_repository and admin_ids required by the
@@ -70,12 +73,21 @@ def telegram_service() -> TelegramService:
             set_model=lambda chat_id, model: None,
         ),
     )
+    user_service = cast(
+        UserServiceInterface,
+        SimpleNamespace(
+            get_user_max_history_turns=lambda user_id: 100,
+            set_user_pro_status=lambda user_id, is_pro: None,
+            is_user_pro=lambda user_id: False,
+        ),
+    )
     return TelegramService(
         command_prefix="/cmd",
         neibot=DummyNeibot(),
         telegram_client=SimpleNamespace(),
         logger=logging.getLogger("TelegramServiceTest"),
         chat_repository=chat_repo,
+        user_service=user_service,
         admin_ids=[123],
     )
 

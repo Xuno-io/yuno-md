@@ -12,6 +12,7 @@ from app.services.NeibotService.neibot_service_interface import NeibotServiceInt
 from app.services.TelegramService.telegram_service_interface import (
     TelegramServiceInterface,
 )
+from app.services.UserService.user_service_interface import UserServiceInterface
 from app.repositories.chat_repository.chat_repository_interface import (
     ChatRepositoryInterface,
 )
@@ -47,8 +48,8 @@ class TelegramService(TelegramServiceInterface):
         telegram_client: TelegramClient,
         logger: logging.Logger,
         chat_repository: ChatRepositoryInterface,
+        user_service: UserServiceInterface,
         admin_ids: list[int],
-        max_history_turns: int = 100,
     ) -> None:
         self.logger: logging.Logger = logger
         self.neibot: NeibotServiceInterface = neibot
@@ -56,12 +57,11 @@ class TelegramService(TelegramServiceInterface):
         self.me: Any | None = None
         self.command_prefix: str = command_prefix.lower()  # Normalize to lowercase
         self.chat_repository = chat_repository
+        self.user_service = user_service
         self.admin_ids = admin_ids
-        self.max_history_turns = max_history_turns
         self.logger.info(
-            "TelegramService initialized with command prefix '%s' and max history turns %s",
+            "TelegramService initialized with command prefix '%s'",
             self.command_prefix,
-            self.max_history_turns,
         )
 
     @classmethod
@@ -72,8 +72,8 @@ class TelegramService(TelegramServiceInterface):
         telegram_client: TelegramClient,
         logger: logging.Logger,
         chat_repository: ChatRepositoryInterface,
+        user_service: UserServiceInterface,
         admin_ids: list[int],
-        max_history_turns: int = 100,
     ) -> TelegramService:
         """Factory to perform async setup steps before returning the service."""
         service = cls(
@@ -82,8 +82,8 @@ class TelegramService(TelegramServiceInterface):
             telegram_client=telegram_client,
             logger=logger,
             chat_repository=chat_repository,
+            user_service=user_service,
             admin_ids=admin_ids,
-            max_history_turns=max_history_turns,
         )
         service.bot.add_event_handler(service._my_event_handler, events.NewMessage)
         return service
@@ -144,20 +144,39 @@ class TelegramService(TelegramServiceInterface):
 
         metadata: str = await self.__build_metadata(event)
 
-        history: list[MessagePayload] = await self.__build_reply_history(event)
+        is_pro = self.user_service.is_user_pro(event.sender_id)
+        max_history_turns = self.user_service.get_user_max_history_turns(
+            event.sender_id
+        )
 
-        if len(history) >= self.max_history_turns:
+        # Rolling Window: Only the last 20 messages are sent to the LLM.
+        ROLLING_WINDOW_SIZE = 20
+
+        # For Pro users, we only need to fetch the window size.
+        # For Free users, we fetch up to the limit to enforce the wall.
+        fetch_limit = ROLLING_WINDOW_SIZE if is_pro else max_history_turns
+
+        history: list[MessagePayload] = await self.__build_reply_history(
+            event, fetch_limit
+        )
+
+        if not is_pro and len(history) >= max_history_turns:
             self.logger.warning(
                 "Conversation history limit reached (%s). Rejecting request.",
-                self.max_history_turns,
+                max_history_turns,
             )
 
             await event.reply(
-                message=f"La conversación ha alcanzado el límite de {self.max_history_turns} mensajes. Por favor, inicia un nuevo hilo o discusión.",
+                message=f"La conversación ha alcanzado el límite de {max_history_turns} mensajes. Por favor, inicia un nuevo hilo o discusión.",
             )
             return
 
-        context_texts, history_attachments = self._extract_referenced_messages(history)
+        # Apply rolling window slice for DSPy context
+        context_for_dspy = history[-ROLLING_WINDOW_SIZE:]
+
+        context_texts, history_attachments = self._extract_referenced_messages(
+            context_for_dspy
+        )
         attachments = self._merge_attachment_lists(history_attachments, attachments)
 
         user_segment: str = f"{metadata}: {user_message}" if user_message else metadata
@@ -169,7 +188,7 @@ class TelegramService(TelegramServiceInterface):
         payload_parts: list[str] = filtered_context + [user_segment]
         payload: str = "\n".join(part for part in payload_parts if part)
 
-        history.append(
+        context_for_dspy.append(
             {
                 "role": "user",
                 "content": payload,
@@ -178,7 +197,8 @@ class TelegramService(TelegramServiceInterface):
         )
 
         self.logger.info(
-            "Constructed payload for Neibot with %s messages in history", len(history)
+            "Constructed payload for Neibot with %s messages in history",
+            len(context_for_dspy),
         )
 
         # Determine model to use
@@ -186,7 +206,7 @@ class TelegramService(TelegramServiceInterface):
 
         async with self.bot.action(event.chat_id, "typing"):
             response: str = await self.neibot.get_response(
-                history, model_name=model_name
+                context_for_dspy, model_name=model_name
             )
 
         await event.reply(response)
@@ -210,16 +230,18 @@ class TelegramService(TelegramServiceInterface):
         )
         return f"[Group: {chat_name}][User: {sender_name}]"
 
-    async def __build_reply_history(self, event) -> list[MessagePayload]:
+    async def __build_reply_history(
+        self, event, max_history_turns: int
+    ) -> list[MessagePayload]:
         history: list[MessagePayload] = []
         current_msg_id = event.reply_to_msg_id
         chat_id = event.chat_id
 
         while current_msg_id:
-            if len(history) >= self.max_history_turns:
+            if len(history) >= max_history_turns:
                 self.logger.warning(
                     "Reached max history turns (%s). Stopping fetch.",
-                    self.max_history_turns,
+                    max_history_turns,
                 )
                 break
 

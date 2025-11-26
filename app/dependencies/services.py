@@ -7,7 +7,9 @@ from app.services.TelegramService.telegram_service import TelegramService
 from app.services.TelegramService.telegram_service_interface import (
     TelegramServiceInterface,
 )
-from app.dependencies.repositories import get_chat_repository
+from app.services.UserService.user_service import UserService
+from app.services.UserService.user_service_interface import UserServiceInterface
+from app.dependencies.repositories import get_chat_repository, get_user_repository
 from telethon import TelegramClient
 from xuno_components.configuration.configuration_interface import ConfigurationInterface
 from xuno_components.logger.logger_interface import LoggerInterface
@@ -60,6 +62,21 @@ def get_neibot_dspy_service(components: Components) -> NeibotServiceInterface:
     )
 
 
+def get_user_service(components: Components) -> UserServiceInterface:
+    configuration = components.get_component(ConfigurationInterface)
+    default_max_history_turns = configuration.get_configuration(
+        "MAX_HISTORY_TURNS", int, default=100
+    )
+    pro_max_history_turns = configuration.get_configuration(
+        "MAX_HISTORY_TURNS_PRO", int, default=200
+    )
+    return UserService(
+        user_repository=get_user_repository(components),
+        default_max_history_turns=default_max_history_turns,
+        pro_max_history_turns=pro_max_history_turns,
+    )
+
+
 async def get_telegram_service(
     components: Components, neibot_service: NeibotServiceInterface
 ) -> TelegramServiceInterface:
@@ -68,17 +85,12 @@ async def get_telegram_service(
         int(id.strip()) for id in admin_ids_str.split(",") if id.strip().isdigit()
     ]
 
-    configuration = components.get_component(ConfigurationInterface)
-    max_history_turns = configuration.get_configuration(
-        "MAX_HISTORY_TURNS", int, default=100
-    )
-
     return await TelegramService.create(
         command_prefix="/yuno",
         neibot=neibot_service,
         telegram_client=components.get_component(TelegramClient),
         logger=components.get_component(LoggerInterface).get_logger("TelegramService"),
         chat_repository=get_chat_repository(components),
+        user_service=get_user_service(components),
         admin_ids=admin_ids,
-        max_history_turns=max_history_turns,
     )
