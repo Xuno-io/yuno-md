@@ -160,6 +160,14 @@ class TelegramService(TelegramServiceInterface):
             event, fetch_limit
         )
 
+        self.logger.info(
+            "Fetched %s messages in history for chat %s, sender_id: %s user is pro: %s",
+            len(history),
+            event.chat_id,
+            event.sender_id,
+            is_pro,
+        )
+
         if not is_pro and len(history) >= max_history_turns:
             self.logger.warning(
                 "Conversation history limit reached (%s). Rejecting request.",
