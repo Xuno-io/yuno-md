@@ -3,8 +3,8 @@
     "LOG_LEVEL": "INFO",
     "REDIS_HOST": "localhost",
     "REDIS_PORT": 6379,
-    "OPENAI_ENDPOINT": "https://chat.xuno.io/api",
-    "MODEL_NAME": "yunoai-v3-preview",
+    "OPENAI_ENDPOINT": "https://openrouter.ai/api/v1/chat/completions",
+    "MODEL_NAME": "openrouter/@preset/yunoai-v3-preview-openrouter",
     "SQLITE_DB_PATH": "neibot_database.sqlite",
     "MAX_HISTORY_TURNS": 50,
     "MAX_HISTORY_TURNS_PRO": 20

@@ -167,7 +167,7 @@ class TelegramService(TelegramServiceInterface):
             )
 
             await event.reply(
-                message=f"La conversación ha alcanzado el límite de {max_history_turns} mensajes. Por favor, inicia un nuevo hilo o discusión.",
+                message=f"La conversación ha alcanzado el límite de {max_history_turns} mensajes. Por favor, inicia un nuevo hilo o discusión con el comando {self.command_prefix} para continuar.",
             )
             return
 
