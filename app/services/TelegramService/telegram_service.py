@@ -144,14 +144,23 @@ class TelegramService(TelegramServiceInterface):
 
         metadata: str = await self.__build_metadata(event)
 
+        is_pro = self.user_service.is_user_pro(event.sender_id)
         max_history_turns = self.user_service.get_user_max_history_turns(
             event.sender_id
         )
+
+        # Rolling Window: Only the last 20 messages are sent to the LLM.
+        ROLLING_WINDOW_SIZE = 20
+
+        # For Pro users, we only need to fetch the window size.
+        # For Free users, we fetch up to the limit to enforce the wall.
+        fetch_limit = ROLLING_WINDOW_SIZE if is_pro else max_history_turns
+
         history: list[MessagePayload] = await self.__build_reply_history(
-            event, max_history_turns
+            event, fetch_limit
         )
 
-        if len(history) >= max_history_turns:
+        if not is_pro and len(history) >= max_history_turns:
             self.logger.warning(
                 "Conversation history limit reached (%s). Rejecting request.",
                 max_history_turns,
@@ -162,7 +171,12 @@ class TelegramService(TelegramServiceInterface):
             )
             return
 
-        context_texts, history_attachments = self._extract_referenced_messages(history)
+        # Apply rolling window slice for DSPy context
+        context_for_dspy = history[-ROLLING_WINDOW_SIZE:]
+
+        context_texts, history_attachments = self._extract_referenced_messages(
+            context_for_dspy
+        )
         attachments = self._merge_attachment_lists(history_attachments, attachments)
 
         user_segment: str = f"{metadata}: {user_message}" if user_message else metadata
@@ -174,7 +188,7 @@ class TelegramService(TelegramServiceInterface):
         payload_parts: list[str] = filtered_context + [user_segment]
         payload: str = "\n".join(part for part in payload_parts if part)
 
-        history.append(
+        context_for_dspy.append(
             {
                 "role": "user",
                 "content": payload,
@@ -183,7 +197,8 @@ class TelegramService(TelegramServiceInterface):
         )
 
         self.logger.info(
-            "Constructed payload for Neibot with %s messages in history", len(history)
+            "Constructed payload for Neibot with %s messages in history",
+            len(context_for_dspy),
         )
 
         # Determine model to use
@@ -191,7 +206,7 @@ class TelegramService(TelegramServiceInterface):
 
         async with self.bot.action(event.chat_id, "typing"):
             response: str = await self.neibot.get_response(
-                history, model_name=model_name
+                context_for_dspy, model_name=model_name
             )
 
         await event.reply(response)

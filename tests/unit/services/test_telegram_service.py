@@ -78,6 +78,7 @@ def telegram_service() -> TelegramService:
         SimpleNamespace(
             get_user_max_history_turns=lambda user_id: 100,
             set_user_pro_status=lambda user_id, is_pro: None,
+            is_user_pro=lambda user_id: False,
         ),
     )
     return TelegramService(

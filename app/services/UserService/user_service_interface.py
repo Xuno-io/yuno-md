@@ -7,5 +7,9 @@ class UserServiceInterface(ABC):
         pass
 
     @abstractmethod
+    def is_user_pro(self, user_id: int) -> bool:
+        pass
+
+    @abstractmethod
     def set_user_pro_status(self, user_id: int, is_pro: bool) -> None:
         pass
