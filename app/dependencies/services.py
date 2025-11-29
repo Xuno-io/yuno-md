@@ -45,11 +45,11 @@ def get_neibot_service(components: Components) -> NeibotServiceInterface:
     openai_endpoint = configuration.get_configuration("OPENAI_ENDPOINT", str)
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
 
-    temp_val = configuration.get_configuration("DSPY_TEMPERATURE", float, default=0.7)
+    temp_val = configuration.get_configuration("LLM_TEMPERATURE", float, default=0.7)
     temperature = float(temp_val if temp_val is not None else 0.7)
 
     max_tokens_val = configuration.get_configuration(
-        "DSPY_MAX_TOKENS", int, default=8192
+        "LLM_MAX_TOKENS", int, default=8192
     )
     max_tokens = int(max_tokens_val if max_tokens_val is not None else 8192)
 

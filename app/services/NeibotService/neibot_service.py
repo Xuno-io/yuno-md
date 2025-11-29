@@ -13,7 +13,6 @@ from app.services.NeibotService.neibot_service_interface import NeibotServiceInt
 class NeibotService(NeibotServiceInterface):
     """
     Service for Neibot using direct OpenAI/LiteLLM API calls with Langfuse tracing.
-    Replaces the DSPy implementation to allow proper caching and native message structure.
     """
 
     def __init__(

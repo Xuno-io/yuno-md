@@ -26,8 +26,6 @@ class TestComponentsOpenAIAPIKeyValidation:
             "REDIS_PORT": 6379,
             "OPENAI_ENDPOINT": "https://api.openai.com/v1",
             "MODEL_NAME": "gpt-4",
-            "DSPY_TEMPERATURE": 0.7,
-            "DSPY_MAX_TOKENS": 8192,
         }
         (config_dir / "default.json").write_text(json.dumps(default_config, indent=2))
 
@@ -41,8 +39,6 @@ class TestComponentsOpenAIAPIKeyValidation:
             "MODEL_NAME": "gpt-4",
             "TELEGRAM_API_ID": 123,
             "TELEGRAM_APP_HASH": "test_hash",
-            "DSPY_TEMPERATURE": 0.7,
-            "DSPY_MAX_TOKENS": 8192,
         }
         (config_dir / "development.json").write_text(json.dumps(dev_config, indent=2))
 

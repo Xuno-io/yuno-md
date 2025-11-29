@@ -17,9 +17,6 @@ from telethon import TelegramClient
 from dotenv import load_dotenv
 from langfuse.openai import OpenAI
 
-# DSPy Langfuse instrumentation
-from openinference.instrumentation.dspy import DSPyInstrumentor
-import dspy
 
 load_dotenv()
 
@@ -46,10 +43,11 @@ def _is_test_environment() -> bool:
 
 def _validate_otel_env_vars() -> None:
     """
-    Validate OpenTelemetry/Langfuse environment variables for DSPy instrumentation.
+    Validate OpenTelemetry/Langfuse environment variables for instrumentation.
 
     This function checks for the necessary environment variables to configure
     OpenTelemetry for Langfuse tracing. It supports two configuration paths:
+
 
     1.  **Langfuse Native Integration:** If `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`,
         and `LANGFUSE_BASE_URL` are all set, validation is skipped, assuming
@@ -95,9 +93,6 @@ def _validate_otel_env_vars() -> None:
 # Skip validation and instrumentation in test environment
 if not _is_test_environment():
     _validate_otel_env_vars()
-    # Initialize DSPy instrumentation for Langfuse tracing
-    # This must happen before any DSPy modules are created
-    DSPyInstrumentor().instrument()
 
 
 T = TypeVar("T")
@@ -178,25 +173,6 @@ class Components(metaclass=ComponentsMeta):
             base_url=openai_endpoint, timeout=timeout, max_retries=max_retries
         )
 
-        # Retrieve configuration values and handle None explicitly to preserve zero values
-        temp_val = configuration.get_configuration(
-            "DSPY_TEMPERATURE", float, default=0.7
-        )
-        temperature = float(temp_val if temp_val is not None else 0.7)
-
-        max_tokens_val = configuration.get_configuration(
-            "DSPY_MAX_TOKENS", int, default=8192
-        )
-        max_tokens = int(max_tokens_val if max_tokens_val is not None else 8192)
-
-        lm: dspy.LM = dspy.LM(
-            model=configuration.get_configuration("MODEL_NAME", str),
-            api_base=configuration.get_configuration("OPENAI_ENDPOINT", str),
-            api_key=openai_api_key,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-
         # Telegram client setup
         telegram_api_id: int = configuration.get_configuration("TELEGRAM_API_ID", int)
         telegram_api_hash: str = configuration.get_configuration(
@@ -219,7 +195,6 @@ class Components(metaclass=ComponentsMeta):
             OpenAI: openai_client,
             LoggerInterface: logger,
             TelegramClient: telegram_client,
-            dspy.LM: lm,
             DBInterface: sqlite_db,
         }
 
