@@ -3,9 +3,11 @@
     "LOG_LEVEL": "INFO",
     "REDIS_HOST": "localhost",
     "REDIS_PORT": 6379,
-    "OPENAI_ENDPOINT": "https://openrouter.ai/api/v1/chat/completions",
-    "MODEL_NAME": "openrouter/@preset/yunoai-v3-preview-openrouter",
+    "OPENAI_ENDPOINT": "https://openrouter.ai/api/v1",
+    "MODEL_NAME": "google/gemini-3-pro-preview",
     "SQLITE_DB_PATH": "neibot_database.sqlite",
     "MAX_HISTORY_TURNS": 50,
-    "MAX_HISTORY_TURNS_PRO": 20
+    "MAX_HISTORY_TURNS_PRO": 20,
+    "COMMAND_PREFIX": "/yuno",
+    "CACHE_TOKEN_THRESHOLD": 2048
 }

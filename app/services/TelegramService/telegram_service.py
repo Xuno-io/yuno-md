@@ -179,7 +179,11 @@ class TelegramService(TelegramServiceInterface):
         )
         attachments = self._merge_attachment_lists(history_attachments, attachments)
 
-        user_segment: str = f"{metadata}: {user_message}" if user_message else metadata
+        user_segment: str = (
+            f"[{event.date.strftime('%Y-%m-%d %H:%M')}] {metadata}: {user_message}"
+            if user_message
+            else metadata
+        )
 
         filtered_context: list[str] = [
             text for text in context_texts if text and text != user_segment
@@ -287,10 +291,11 @@ class TelegramService(TelegramServiceInterface):
                     or "Direct"
                 )
 
+                timestamp = replied_msg.date.strftime("%Y-%m-%d %H:%M")
                 if role == "assistant":
-                    message_content = replied_msg.raw_text or ""
+                    message_content = f"[{timestamp}] {replied_msg.raw_text or ''}"
                 else:
-                    message_content = f"[Group: {chat_name}][User: {replied_sender_name}]: {replied_msg.raw_text or ''}"
+                    message_content = f"[{timestamp}] [Group: {chat_name}][User: {replied_sender_name}]: {replied_msg.raw_text or ''}"
 
                 attachments = await self._collect_image_attachments(
                     replied_msg, strict=False
