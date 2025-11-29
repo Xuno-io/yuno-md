@@ -3,7 +3,6 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, TypeVar, cast
 
-import httpx
 
 from xuno_components.configuration.configuration import Configuration
 from xuno_components.configuration.configuration_interface import ConfigurationInterface
@@ -11,11 +10,10 @@ from xuno_components.logger.logger import Logger
 from xuno_components.logger.logger_interface import LoggerInterface
 from xuno_components.database.db_interface import DBInterface
 from app.components.database.sqlite_db import SqliteDB
+from openinference.instrumentation.google_genai import GoogleGenAIInstrumentor
 
-# from openai import OpenAI
 from telethon import TelegramClient
 from dotenv import load_dotenv
-from langfuse.openai import OpenAI
 
 
 load_dotenv()
@@ -94,6 +92,7 @@ def _validate_otel_env_vars() -> None:
 if not _is_test_environment():
     _validate_otel_env_vars()
 
+    GoogleGenAIInstrumentor().instrument()
 
 T = TypeVar("T")
 
@@ -140,39 +139,6 @@ class Components(metaclass=ComponentsMeta):
         )
         _logger_instance = logger.get_logger("Components")
 
-        # Configure OpenAI client with timeout and retries from configuration
-        openai_endpoint: str = configuration.get_configuration("OPENAI_ENDPOINT", str)
-        timeout_seconds: float = float(
-            configuration.get_configuration(
-                "OPENAI_TIMEOUT_SECONDS", float, default=300.0
-            )
-            or 300.0
-        )  # type: ignore[arg-type]
-        max_retries: int = int(
-            configuration.get_configuration("OPENAI_MAX_RETRIES", int, default=2) or 2
-        )
-        try:
-            # Prefer granular timeout config
-            timeout: httpx.Timeout = httpx.Timeout(timeout_seconds)
-        except Exception:
-            timeout = timeout_seconds  # type: ignore[assignment]
-        # Retrieve and validate OpenAI API key before creating clients
-        openai_api_key: str = os.getenv("OPENAI_API_KEY", "").strip()
-        if not openai_api_key:
-            raise RuntimeError(
-                "OPENAI_API_KEY environment variable is not set or is empty. "
-                "Please set the OPENAI_API_KEY environment variable with a valid API key."
-            )
-
-        _logger_instance.info(
-            f"OpenAI client configured with endpoint: {openai_endpoint}, "
-            f"timeout: {timeout}, max_retries: {max_retries}"
-        )
-
-        openai_client: OpenAI = OpenAI(
-            base_url=openai_endpoint, timeout=timeout, max_retries=max_retries
-        )
-
         # Telegram client setup
         telegram_api_id: int = configuration.get_configuration("TELEGRAM_API_ID", int)
         telegram_api_hash: str = configuration.get_configuration(
@@ -192,7 +158,6 @@ class Components(metaclass=ComponentsMeta):
 
         components: dict[type[Any], Any] = {
             ConfigurationInterface: configuration,
-            OpenAI: openai_client,
             LoggerInterface: logger,
             TelegramClient: telegram_client,
             DBInterface: sqlite_db,

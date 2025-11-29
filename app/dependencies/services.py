@@ -42,8 +42,10 @@ def get_neibot_service(components: Components) -> NeibotServiceInterface:
 
     # Extract configuration values for LM creation
     model_name = configuration.get_configuration("MODEL_NAME", str)
-    openai_endpoint = configuration.get_configuration("OPENAI_ENDPOINT", str)
-    openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    location = configuration.get_configuration(
+        "VERTEX_LOCATION", str, default="us-central1"
+    )
+    project_id = os.getenv("VERTEX_PROJECT_ID", "").strip()
 
     temp_val = configuration.get_configuration("LLM_TEMPERATURE", float, default=0.7)
     temperature = float(temp_val if temp_val is not None else 0.7)
@@ -63,8 +65,8 @@ def get_neibot_service(components: Components) -> NeibotServiceInterface:
     return NeibotService(
         system_prompt=system_prompt,
         model_name=model_name,
-        api_key=openai_api_key,
-        api_base=openai_endpoint,
+        location=location,
+        project_id=project_id or None,
         temperature=temperature,
         max_tokens=max_tokens,
         cache_threshold=cache_threshold,
