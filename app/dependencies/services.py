@@ -1,8 +1,9 @@
 import os
+from pathlib import Path
 
 from app.bootstrap.components import Components
 from app.services.NeibotService.neibot_service_interface import NeibotServiceInterface
-from app.services.NeibotService.neibot_dspy_service import NeibotDSPyService
+from app.services.NeibotService.neibot_service import NeibotService
 from app.services.TelegramService.telegram_service import TelegramService
 from app.services.TelegramService.telegram_service_interface import (
     TelegramServiceInterface,
@@ -15,14 +16,16 @@ from xuno_components.configuration.configuration_interface import ConfigurationI
 from xuno_components.logger.logger_interface import LoggerInterface
 
 
-def get_neibot_dspy_service(components: Components) -> NeibotServiceInterface:
+def get_neibot_service(components: Components) -> NeibotServiceInterface:
     """
-    Create a DSPy-powered Neibot service with YunoAI and Langfuse tracing.
-
-    This service uses DSPy for structured LLM programming and Langfuse for observability.
+    Create a Neibot service with direct OpenAI/LiteLLM calls and Langfuse tracing.
     """
     configuration = components.get_component(ConfigurationInterface)
-    system_prompt = configuration.get_configuration("SYSTEM_PROMPT", str)
+
+    try:
+        system_prompt = Path("yuno.prompt").read_text(encoding="utf-8")
+    except Exception:
+        system_prompt = configuration.get_configuration("SYSTEM_PROMPT", str)
 
     # Get creator username
     creator_username = os.getenv("CREATOR_USERNAME", "").strip()
@@ -34,7 +37,8 @@ def get_neibot_dspy_service(components: Components) -> NeibotServiceInterface:
     if not creator_username.startswith("@"):
         creator_username = f"@{creator_username}"
 
-    system_prompt = system_prompt.replace("{CREATOR_USERNAME}", creator_username)
+    if "{CREATOR_USERNAME}" in system_prompt:
+        system_prompt = system_prompt.replace("{CREATOR_USERNAME}", creator_username)
 
     # Extract configuration values for LM creation
     model_name = configuration.get_configuration("MODEL_NAME", str)
@@ -49,16 +53,22 @@ def get_neibot_dspy_service(components: Components) -> NeibotServiceInterface:
     )
     max_tokens = int(max_tokens_val if max_tokens_val is not None else 8192)
 
-    return NeibotDSPyService(
+    cache_threshold_val = configuration.get_configuration(
+        "CACHE_TOKEN_THRESHOLD", int, default=2048
+    )
+    cache_threshold = int(
+        cache_threshold_val if cache_threshold_val is not None else 2048
+    )
+
+    return NeibotService(
         system_prompt=system_prompt,
         model_name=model_name,
         api_key=openai_api_key,
         api_base=openai_endpoint,
         temperature=temperature,
         max_tokens=max_tokens,
-        logger=components.get_component(LoggerInterface).get_logger(
-            "NeibotDSPyService"
-        ),
+        cache_threshold=cache_threshold,
+        logger=components.get_component(LoggerInterface).get_logger("NeibotService"),
     )
 
 
@@ -85,8 +95,14 @@ async def get_telegram_service(
         int(id.strip()) for id in admin_ids_str.split(",") if id.strip().isdigit()
     ]
 
+    configuration = components.get_component(ConfigurationInterface)
+
+    prefix: str = configuration.get_configuration(
+        "COMMAND_PREFIX", str, default="/yuno"
+    )
+
     return await TelegramService.create(
-        command_prefix="/yuno",
+        command_prefix=prefix,
         neibot=neibot_service,
         telegram_client=components.get_component(TelegramClient),
         logger=components.get_component(LoggerInterface).get_logger("TelegramService"),

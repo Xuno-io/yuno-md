@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
+from datetime import datetime
 from app.services.TelegramService.telegram_service import TelegramService
 
 
@@ -59,16 +60,21 @@ async def test_build_reply_history_fetches_and_saves(
     msg100.download_media = AsyncMock(return_value=None)  # No media
     msg100.media = None
     msg100.photo = None
+    msg100.date = datetime(2025, 11, 29, 14, 30)
 
     mock_client.get_messages.return_value = msg100
 
     # Execute
     max_history_turns = 100
-    history = await telegram_service._TelegramService__build_reply_history(event, max_history_turns)
+    history = await telegram_service._TelegramService__build_reply_history(
+        event, max_history_turns
+    )
 
     # Verify
     assert len(history) == 1
-    assert history[0]["content"] == "[Group: Chat][User: alice]: Hello"
+    assert (
+        history[0]["content"] == "[2025-11-29 14:30] [Group: Chat][User: alice]: Hello"
+    )
 
     # Verify repository calls
     mock_chat_repo.get_message.assert_called_once_with(123, 100)
@@ -76,7 +82,9 @@ async def test_build_reply_history_fetches_and_saves(
     args = mock_chat_repo.save_message.call_args
     assert args[0][0] == 123  # chat_id
     assert args[0][1] == 100  # message_id
-    assert args[0][2]["content"] == "[Group: Chat][User: alice]: Hello"
+    assert (
+        args[0][2]["content"] == "[2025-11-29 14:30] [Group: Chat][User: alice]: Hello"
+    )
     assert args[0][3] is None  # reply_to_msg_id
 
 
@@ -111,17 +119,21 @@ async def test_build_reply_history_uses_cache(
     msg100.get_chat.return_value = MagicMock(title="Chat")
     msg100.media = None
     msg100.photo = None
+    msg100.date = datetime(2025, 11, 29, 14, 30)
 
     mock_client.get_messages.return_value = msg100
 
     # Execute
     max_history_turns = 100
-    history = await telegram_service._TelegramService__build_reply_history(event, max_history_turns)
+    history = await telegram_service._TelegramService__build_reply_history(
+        event, max_history_turns
+    )
 
     # Verify
     assert len(history) == 2
     assert (
-        history[0]["content"] == "[Group: Chat][User: bob]: Fetched Message"
+        history[0]["content"]
+        == "[2025-11-29 14:30] [Group: Chat][User: bob]: Fetched Message"
     )  # Inserted at 0
     assert history[1]["content"] == "Cached Message"
 
