@@ -296,6 +296,80 @@ class TestBuildMessagesAttachmentHandling:
         # Should have logged 2 warnings (one for each invalid attachment)
         assert mock_warning.call_count == 2
 
+    def test_build_messages_skips_message_with_empty_content_parts(
+        self, neibot_service: NeibotService, logger: logging.Logger
+    ) -> None:
+        """Test that message is skipped when no text AND all attachments are invalid."""
+        history: list[MessagePayload] = [
+            cast(
+                MessagePayload,
+                {
+                    "role": "user",
+                    "content": "",  # Empty text
+                    "attachments": [
+                        {
+                            "mime_type": "image/png",
+                            "size_bytes": 100,
+                            "base64": "",  # Invalid: empty base64
+                            "file_name": "image1.png",
+                        },
+                        {
+                            "mime_type": "image/jpeg",
+                            "size_bytes": 100,
+                            # Missing base64 - intentionally malformed
+                            "file_name": "image2.jpg",
+                        },
+                    ],
+                },
+            )
+        ]
+
+        with patch.object(logger, "warning") as mock_warning:
+            messages = neibot_service._build_messages(history)
+
+        # Should only have system message (user message skipped)
+        assert len(messages) == 1
+        assert messages[0]["role"] == "system"
+        # Should have logged warnings for invalid attachments + one for skipped message
+        assert mock_warning.call_count == 3
+        # Verify the skip message was logged
+        warning_calls = [str(call) for call in mock_warning.call_args_list]
+        assert any("empty content" in call for call in warning_calls)
+
+    def test_build_messages_skips_message_preserves_other_messages(
+        self, neibot_service: NeibotService, logger: logging.Logger
+    ) -> None:
+        """Test that skipping one message preserves valid messages in history."""
+        history: list[MessagePayload] = [
+            {"role": "user", "content": "First message", "attachments": []},
+            cast(
+                MessagePayload,
+                {
+                    "role": "assistant",
+                    "content": "",  # Empty text
+                    "attachments": [
+                        {
+                            "mime_type": "image/png",
+                            "base64": "",  # Invalid
+                            "file_name": "broken.png",
+                        }
+                    ],
+                },
+            ),
+            {"role": "user", "content": "Third message", "attachments": []},
+        ]
+
+        with patch.object(logger, "warning"):
+            messages = neibot_service._build_messages(history)
+
+        # Should have: system + first user + third user (assistant skipped)
+        assert len(messages) == 3
+        assert messages[0]["role"] == "system"
+        assert messages[1]["role"] == "user"
+        assert messages[1]["content"] == "First message"
+        assert messages[2]["role"] == "user"
+        assert messages[2]["content"] == "Third message"
+
 
 class TestGetResponseMalformedHandling:
     """Test cases for safe handling of malformed API responses in get_response."""

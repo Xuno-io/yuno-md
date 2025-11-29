@@ -216,6 +216,14 @@ class NeibotService(NeibotServiceInterface):
                         }
                     )
 
+                # Handle edge case: empty content_parts (no text AND all attachments invalid)
+                # Skip this message to avoid sending empty content to the API
+                if not content_parts:
+                    self.logger.warning(
+                        "Skipping message with empty content: no text and all attachments invalid"
+                    )
+                    continue
+
                 messages.append({"role": role, "content": content_parts})
 
         # Smart Caching Logic
