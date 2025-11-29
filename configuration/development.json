@@ -7,5 +7,7 @@
     "MODEL_NAME": "google/gemini-3-pro-preview",
     "SQLITE_DB_PATH": "neibot_database.sqlite",
     "MAX_HISTORY_TURNS": 50,
-    "MAX_HISTORY_TURNS_PRO": 20
+    "MAX_HISTORY_TURNS_PRO": 20,
+    "COMMAND_PREFIX": "/yuno",
+    "CACHE_TOKEN_THRESHOLD": 2048
 }

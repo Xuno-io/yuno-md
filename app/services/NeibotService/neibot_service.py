@@ -73,11 +73,11 @@ class NeibotService(NeibotServiceInterface):
             The assistant's response
         """
         try:
-            messages = self._build_messages(history)
-
+            messages = self._build_messages(history, model_name_override=model_name)
+            
             # Use override model if provided, else default
             current_model = model_name or self.model_name
-
+            
             if current_model != self.model_name:
                 self.logger.info(f"Using custom model {current_model}")
 
@@ -87,9 +87,9 @@ class NeibotService(NeibotServiceInterface):
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
             )
-
+            
             return response.choices[0].message.content or ""
-
+            
         except Exception as e:
             self.logger.error(f"Error getting response from OpenAI: {e}", exc_info=True)
             return "I'm sorry, I couldn't process your request at the moment."
@@ -111,63 +111,89 @@ class NeibotService(NeibotServiceInterface):
                         count += len(self.tokenizer.encode(part.get("text", "")))
         return count
 
-    def _build_messages(self, history: list[MessagePayload]) -> list[dict[str, Any]]:
+    def _supports_explicit_caching(self, current_model: str | None = None) -> bool:
+        """
+        Determine if the provider requires explicit `cache_control` checkpoints.
+        Based on OpenRouter documentation:
+        - Anthropic: YES (Requires checkpoints)
+        - Gemini (via OpenRouter): YES (Requires checkpoints for explicit control)
+        - OpenAI/DeepSeek/Grok: NO (Automatic caching, injecting field might break schema)
+        """
+        # Use override model if provided, else default
+        model = (current_model or self.model_name).lower()
+        base_url = str(self.client.base_url).lower()
+        
+        # Anthropic always uses explicit caching
+        if "claude" in model or "anthropic" in base_url:
+            return True
+            
+        # Gemini via OpenRouter uses explicit caching
+        # (Native Google API uses implicit, but we assume OpenRouter usage based on config)
+        if "gemini" in model and "openrouter" in base_url:
+            return True
+            
+        return False
+
+    def _build_messages(
+        self, history: list[MessagePayload], model_name_override: str | None = None
+    ) -> list[dict[str, Any]]:
         """
         Convert internal MessagePayload history to OpenAI message format.
         Handles text and image attachments.
         Implements smart caching based on token threshold.
         """
         messages: list[dict[str, Any]] = []
-
+        
         # Always prepend the system prompt
         if self.system_prompt:
             messages.append({"role": "system", "content": self.system_prompt})
-
+            
         for msg in history:
             role = msg.get("role", "user")
             content_text = msg.get("content", "")
             attachments = msg.get("attachments", [])
-
+            
             if not attachments:
                 # Simple text message
                 messages.append({"role": role, "content": content_text})
             else:
                 # Multimodal message
                 content_parts: list[dict[str, Any]] = []
-
+                
                 # Add text part if exists
                 if content_text:
                     content_parts.append({"type": "text", "text": content_text})
-
+                
                 # Add images
                 for attachment in attachments:
                     base64_data = attachment["base64"]
                     mime_type = attachment.get("mime_type", "image/jpeg")
-
+                    
                     # Construct data URL
                     image_url = f"data:{mime_type};base64,{base64_data}"
-
+                    
                     content_parts.append(
                         {
-                            "type": "image_url",
+                            "type": "image_url", 
                             "image_url": {"url": image_url},
-                            # Images in history could theoretically be cached,
+                            # Images in history could theoretically be cached, 
                             # but we control cache via the message level flag.
                         }
                     )
-
+                
                 messages.append({"role": role, "content": content_parts})
 
         # Smart Caching Logic
         # We want to cache the "floor" (static history) if it exceeds the threshold.
         # The floor is everything EXCEPT the last message (which is the current user query).
-
-        if len(messages) > 1:
+        
+        # Guard: Check if we have enough messages AND if the provider supports caching
+        if len(messages) > 1 and self._supports_explicit_caching(model_name_override):
             # Candidates for caching: all messages except the last one
             static_context = messages[:-1]
-
+            
             total_tokens = self._count_tokens(static_context)
-
+            
             if total_tokens > self.cache_threshold:
                 # Mark the last message of the static context as the cache checkpoint
                 # This tells the provider to cache everything up to this point
@@ -183,5 +209,7 @@ class NeibotService(NeibotServiceInterface):
                     total_tokens,
                     self.cache_threshold,
                 )
-
+        elif len(messages) > 1:
+             self.logger.debug("Smart Caching DISABLED: Provider/Model does not support explicit cache_control")
+        
         return messages
