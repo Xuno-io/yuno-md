@@ -171,12 +171,10 @@ class TelegramService(TelegramServiceInterface):
             )
             return
 
-        # Apply rolling window slice for DSPy context
-        context_for_dspy = history[-ROLLING_WINDOW_SIZE:]
+        # Apply rolling window slice for context
+        context = history[-ROLLING_WINDOW_SIZE:]
 
-        context_texts, history_attachments = self._extract_referenced_messages(
-            context_for_dspy
-        )
+        context_texts, history_attachments = self._extract_referenced_messages(context)
         attachments = self._merge_attachment_lists(history_attachments, attachments)
 
         user_segment: str = (
@@ -192,7 +190,7 @@ class TelegramService(TelegramServiceInterface):
         payload_parts: list[str] = filtered_context + [user_segment]
         payload: str = "\n".join(part for part in payload_parts if part)
 
-        context_for_dspy.append(
+        context.append(
             {
                 "role": "user",
                 "content": payload,
@@ -202,7 +200,7 @@ class TelegramService(TelegramServiceInterface):
 
         self.logger.info(
             "Constructed payload for Neibot with %s messages in history",
-            len(context_for_dspy),
+            len(context),
         )
 
         # Determine model to use
@@ -210,7 +208,7 @@ class TelegramService(TelegramServiceInterface):
 
         async with self.bot.action(event.chat_id, "typing"):
             response: str = await self.neibot.get_response(
-                context_for_dspy, model_name=model_name
+                context, model_name=model_name
             )
 
         await event.reply(response)
