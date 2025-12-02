@@ -72,9 +72,7 @@ async def test_build_reply_history_fetches_and_saves(
 
     # Verify
     assert len(history) == 1
-    assert (
-        history[0]["content"] == "[2025-11-29 14:30] [Group: Chat][User: alice]: Hello"
-    )
+    assert history[0]["content"] == "[Group: Chat][User: alice]: Hello"
 
     # Verify repository calls
     mock_chat_repo.get_message.assert_called_once_with(123, 100)
@@ -82,9 +80,7 @@ async def test_build_reply_history_fetches_and_saves(
     args = mock_chat_repo.save_message.call_args
     assert args[0][0] == 123  # chat_id
     assert args[0][1] == 100  # message_id
-    assert (
-        args[0][2]["content"] == "[2025-11-29 14:30] [Group: Chat][User: alice]: Hello"
-    )
+    assert args[0][2]["content"] == "[Group: Chat][User: alice]: Hello"
     assert args[0][3] is None  # reply_to_msg_id
 
 
@@ -132,8 +128,7 @@ async def test_build_reply_history_uses_cache(
     # Verify
     assert len(history) == 2
     assert (
-        history[0]["content"]
-        == "[2025-11-29 14:30] [Group: Chat][User: bob]: Fetched Message"
+        history[0]["content"] == "[Group: Chat][User: bob]: Fetched Message"
     )  # Inserted at 0
     assert history[1]["content"] == "Cached Message"
 
