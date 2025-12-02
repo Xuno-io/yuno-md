@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import base64
+from datetime import datetime, timezone
 
 from google import genai
 from google.genai import types
@@ -82,11 +83,17 @@ class NeibotService(NeibotServiceInterface):
             if current_model != self.model_name:
                 self.logger.info(f"Using custom model {current_model}")
 
+            # Add current UTC time to system prompt
+            utc_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            system_prompt_with_time = (
+                f"{self.system_prompt}\n\nCurrent time (UTC): {utc_time}"
+            )
+
             # Configure generation parameters
             config = types.GenerateContentConfig(
                 temperature=self.temperature,
                 max_output_tokens=self.max_tokens,
-                system_instruction=self.system_prompt,
+                system_instruction=system_prompt_with_time,
                 tools=[types.Tool(google_search=types.GoogleSearch())],
             )
 
