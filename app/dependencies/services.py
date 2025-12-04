@@ -4,6 +4,10 @@ from pathlib import Path
 from app.bootstrap.components import Components
 from app.services.NeibotService.neibot_service_interface import NeibotServiceInterface
 from app.services.NeibotService.neibot_service import NeibotService
+from app.services.KnowledgeService.knowledge_service_interface import (
+    KnowledgeServiceInterface,
+)
+from app.services.KnowledgeService.knowledge_service import KnowledgeService
 from app.services.TelegramService.telegram_service import TelegramService
 from app.services.TelegramService.telegram_service_interface import (
     TelegramServiceInterface,
@@ -71,6 +75,18 @@ def get_neibot_service(components: Components) -> NeibotServiceInterface:
         max_tokens=max_tokens,
         cache_threshold=cache_threshold,
         logger=components.get_component(LoggerInterface).get_logger("NeibotService"),
+        knowledge_service=get_knowledge_service(components),
+    )
+
+
+def get_knowledge_service(components: Components) -> KnowledgeServiceInterface:
+    configuration = components.get_component(ConfigurationInterface)
+    logger = components.get_component(LoggerInterface)
+    return KnowledgeService(
+        base_url=configuration.get_configuration(
+            "KNOWLEDGE_BASE_URL", str, default="http://127.0.0.1:8088"
+        ),
+        logger=logger.get_logger("KnowledgeService"),
     )
 
 
