@@ -204,7 +204,7 @@ class TelegramService(TelegramServiceInterface):
 
         async with self.bot.action(event.chat_id, "typing"):
             response: str = await self.neibot.get_response(
-                context, model_name=model_name
+                context, model_name=model_name, user_id=str(event.sender_id)
             )
 
         await event.reply(response)

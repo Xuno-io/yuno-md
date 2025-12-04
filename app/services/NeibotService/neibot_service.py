@@ -10,6 +10,9 @@ from langfuse import observe
 
 from app.entities.message import MessagePayload
 from app.services.NeibotService.neibot_service_interface import NeibotServiceInterface
+from app.services.KnowledgeService.knowledge_service_interface import (
+    KnowledgeServiceInterface,
+)
 
 
 class NeibotService(NeibotServiceInterface):
@@ -27,6 +30,7 @@ class NeibotService(NeibotServiceInterface):
         max_tokens: int,
         logger: logging.Logger,
         cache_threshold: int = 2048,
+        knowledge_service: KnowledgeServiceInterface | None = None,
     ) -> None:
         """
         Initialize the service with Google Gen AI configuration.
@@ -40,6 +44,7 @@ class NeibotService(NeibotServiceInterface):
             max_tokens: Max tokens for generation
             logger: Logger instance
             cache_threshold: Token threshold (unused in this version, kept for interface)
+            knowledge_service: Optional service for accessing the knowledge base
         """
         self.system_prompt = system_prompt
         self.model_name = model_name
@@ -49,6 +54,7 @@ class NeibotService(NeibotServiceInterface):
         self.max_tokens = max_tokens
         self.logger = logger
         self.cache_threshold = cache_threshold
+        self.knowledge_service = knowledge_service
 
         # Initialize Google Gen AI Client (Vertex AI backend)
         self.client = genai.Client(
@@ -63,7 +69,10 @@ class NeibotService(NeibotServiceInterface):
 
     @observe()
     async def get_response(
-        self, history: list[MessagePayload], model_name: str | None = None
+        self,
+        history: list[MessagePayload],
+        model_name: str | None = None,
+        user_id: str | None = None,
     ) -> str:
         """
         Get a response using Google Gen AI SDK.
@@ -71,6 +80,7 @@ class NeibotService(NeibotServiceInterface):
         Args:
             history: List of MessagePayload objects with role, content, and attachments
             model_name: Optional model name to override the default
+            user_id: Optional user ID to fetch knowledge context
 
         Returns:
             The assistant's response
@@ -83,11 +93,30 @@ class NeibotService(NeibotServiceInterface):
             if current_model != self.model_name:
                 self.logger.info(f"Using custom model {current_model}")
 
+            # Fetch knowledge context if user_id is provided
+            knowledge_context = ""
+            if user_id and self.knowledge_service:
+                try:
+                    # Query all active facts for this entity
+                    facts = self.knowledge_service.query(
+                        {"entity": user_id, "active_only": True}
+                    )
+                    if facts:
+                        facts_list = [
+                            f"- {f.get('attribute')}: {f.get('value')}" for f in facts
+                        ]
+                        knowledge_context = "\n\n[MEMORY CONTEXT]\n" + "\n".join(
+                            facts_list
+                        )
+                        self.logger.info(
+                            f"Injected {len(facts)} facts for user {user_id}"
+                        )
+                except Exception as e:
+                    self.logger.warning(f"Failed to fetch knowledge context: {e}")
+
             # Add current UTC time to system prompt
             utc_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-            system_prompt_with_time = (
-                f"{self.system_prompt}\n\nCurrent time (UTC): {utc_time}"
-            )
+            system_prompt_with_time = f"{self.system_prompt}\n\nCurrent time (UTC): {utc_time}{knowledge_context}"
 
             # Configure generation parameters
             config = types.GenerateContentConfig(
