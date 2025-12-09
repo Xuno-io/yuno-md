@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import base64
+import json
 from datetime import datetime, timezone
 
 from google import genai
@@ -160,6 +161,81 @@ class NeibotService(NeibotServiceInterface):
                 f"Error getting response from Google Gen AI: {e}", exc_info=True
             )
             return "I'm sorry, I couldn't process your request at the moment."
+
+    @observe()
+    async def capture_facts_from_history(
+        self,
+        history: list[MessagePayload],
+        user_id: str,
+    ) -> int:
+        """
+        Analyze history, extract facts, and save them to the knowledge base.
+        Returns the number of facts saved.
+        """
+        if not self.knowledge_service:
+            self.logger.warning("Knowledge service not available for capturing facts.")
+            return 0
+
+        try:
+            # Prepare conversation text
+            conversation_text = ""
+            for msg in history:
+                role = msg.get("role", "user").upper()
+                content = msg.get("content", "")
+                conversation_text += f"{role}: {content}\n"
+
+            prompt = (
+                f"Analyze the following conversation history and extract stable facts about the USER (id: {user_id}).\n"
+                "Ignore trivial details, greetings, or temporary context.\n"
+                "Focus on: names, preferences, job, location, interests, specific relationships.\n"
+                "Return the output as a JSON list of objects. Each object must have:\n"
+                "  - 'attribute': string (snake_case key, e.g., 'user_name', 'favorite_color')\n"
+                "  - 'value': string, number, or boolean (the fact value)\n"
+                "  - 'confidence': number (0.0 to 1.0)\n"
+                "If no facts are found, return an empty list [].\n\n"
+                "Conversation:\n"
+                f"{conversation_text}"
+            )
+
+            config = types.GenerateContentConfig(
+                temperature=0.0,
+                max_output_tokens=2048,
+                response_mime_type="application/json",
+            )
+
+            response = await self.client.aio.models.generate_content(
+                model=self.model_name,
+                contents=[
+                    types.Content(
+                        role="user", parts=[types.Part.from_text(text=prompt)]
+                    )
+                ],
+                config=config,
+            )
+
+            if not response.text:
+                return 0
+
+            facts = json.loads(response.text)
+            if not isinstance(facts, list):
+                return 0
+
+            saved_count = 0
+            for fact in facts:
+                if not isinstance(fact, dict) or fact.get("confidence", 0) <= 0.7:
+                    continue
+
+                attr = fact.get("attribute")
+                val = fact.get("value")
+                if attr and val is not None:
+                    if self.knowledge_service.add_fact(user_id, attr, val):
+                        saved_count += 1
+
+            return saved_count
+
+        except Exception as e:
+            self.logger.error(f"Error capturing facts: {e}", exc_info=True)
+            return 0
 
     def _build_contents(self, history: list[MessagePayload]) -> list[types.Content]:
         """

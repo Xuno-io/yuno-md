@@ -12,3 +12,14 @@ class NeibotServiceInterface(ABC):
         user_id: str | None = None,
     ) -> str:
         """Return the assistant reply for the provided conversation history."""
+
+    @abstractmethod
+    async def capture_facts_from_history(
+        self,
+        history: list[MessagePayload],
+        user_id: str,
+    ) -> int:
+        """
+        Analyze history, extract facts, and save them to the knowledge base.
+        Returns the number of facts saved.
+        """

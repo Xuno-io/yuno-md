@@ -100,13 +100,20 @@ class TelegramService(TelegramServiceInterface):
         raw_message_lower = raw_message_stripped.lower()
 
         # Handle /help command
-        if raw_message_lower.startswith("/help"):
+        if raw_message_lower.startswith("/help") or raw_message_lower.startswith(
+            "/start"
+        ):
             await self._handle_help_command(event)
             return
 
         # Handle /yuno-model command
         if raw_message_lower.startswith("/yuno-model"):
             await self._handle_model_command(event, raw_message_stripped)
+            return
+
+        # Handle /save command
+        if raw_message_lower.startswith("/save"):
+            await self._handle_save_command(event)
             return
 
         message = getattr(event, "message", None) or event
@@ -334,11 +341,11 @@ class TelegramService(TelegramServiceInterface):
         message_text = message_text.strip().lower()
         if message_text.startswith(self.command_prefix):
             return True
-        elif message_text.startswith("/help"):
+        elif message_text.startswith("/help") or message_text.startswith("/start"):
             return True
         elif message_text.startswith("/yuno-model"):
             return True
-        elif "@yunoaidotcom" in message_text:
+        elif "@yunodotbot" in message_text:
             return True
 
         if event.reply_to_msg_id:
@@ -510,6 +517,40 @@ class TelegramService(TelegramServiceInterface):
             "O bien mencionando @yunoaidotcom en tu mensaje.\n\n"
         )
         await event.reply(help_message)
+
+    async def _handle_save_command(self, event) -> None:
+        """
+        Extracts facts from conversation history and saves them to memory.
+        """
+        try:
+            await event.reply(
+                "Analizando la conversación para extraer datos importantes..."
+            )
+
+            # 1. Fetch history
+            max_history = 50  # Analyze last 50 messages for context
+            history = await self.__build_reply_history(event, max_history)
+
+            # 2. Extract and save facts using Neibot
+            user_id = str(event.sender_id)
+            async with self.bot.action(event.chat_id, "typing"):
+                saved_count = await self.neibot.capture_facts_from_history(
+                    history, user_id=user_id
+                )
+
+            # 3. Reply
+            if saved_count > 0:
+                await event.reply(
+                    f"He guardado {saved_count} nuevos datos sobre ti en mi memoria."
+                )
+            else:
+                await event.reply(
+                    "No encontré nuevos datos relevantes para guardar o el servicio de memoria no está disponible."
+                )
+
+        except Exception as e:
+            self.logger.error(f"Error in /save command: {e}", exc_info=True)
+            await event.reply("Ocurrió un error al intentar guardar la memoria.")
 
     async def _handle_model_command(self, event, raw_message: str) -> None:
         try:
