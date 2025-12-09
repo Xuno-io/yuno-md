@@ -18,12 +18,23 @@ from app.services.TelegramService.telegram_service import (
 from app.repositories.chat_repository.chat_repository_interface import (
     ChatRepositoryInterface,
 )
+from app.services.UserService.user_service_interface import UserServiceInterface
 
 
 class DummyNeibot(NeibotServiceInterface):
     async def get_response(
-        self, history: list[MessagePayload], model_name: str | None = None
+        self,
+        history: list[MessagePayload],
+        model_name: str | None = None,
+        user_id: str | None = None,
     ) -> str:
+        raise NotImplementedError
+
+    async def capture_facts_from_history(
+        self,
+        history: list[MessagePayload],
+        user_id: str,
+    ) -> int:
         raise NotImplementedError
 
 
@@ -57,9 +68,6 @@ class StubMessage:
             raise self._download_error
         file.write(self._data)
         return file
-
-
-from app.services.UserService.user_service_interface import UserServiceInterface
 
 
 @pytest.fixture
