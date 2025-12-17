@@ -311,9 +311,10 @@ class TestQuery:
         )
 
         assert len(result) == 1
-        # Verify the pattern was sent correctly (wrapped in 'pattern' key)
+        # Verify the pattern was sent correctly (sent directly, not wrapped)
         assert mock_http.last_post_payload == {
-            "pattern": {"entity": "user:123", "attribute": "name"}
+            "entity": "user:123",
+            "attribute": "name",
         }
 
 
