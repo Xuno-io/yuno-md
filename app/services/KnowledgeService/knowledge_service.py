@@ -182,8 +182,7 @@ class KnowledgeService(KnowledgeServiceInterface):
         Returns:
             List of matching facts, or empty list on error.
         """
-        body = pattern if isinstance(pattern, dict) else {}
-        data = self._post("/query", body)
+        data = self._post("/query", pattern)
 
         if data is None:
             return []
