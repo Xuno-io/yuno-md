@@ -10,10 +10,14 @@ class UserService(UserServiceInterface):
         user_repository: UserRepositoryInterface,
         default_max_history_turns: int,
         pro_max_history_turns: int,
+        default_model_name: str,
+        pro_model_name: str,
     ):
         self.user_repository = user_repository
         self.default_max_history_turns = default_max_history_turns
         self.pro_max_history_turns = pro_max_history_turns
+        self.default_model_name = default_model_name
+        self.pro_model_name = pro_model_name
 
     def get_user_max_history_turns(self, user_id: int) -> int:
         if self.is_user_pro(user_id):
@@ -26,3 +30,9 @@ class UserService(UserServiceInterface):
 
     def set_user_pro_status(self, user_id: int, is_pro: bool) -> None:
         self.user_repository.set_user_pro_status(user_id, is_pro)
+
+    def get_user_model(self, user_id: int) -> str:
+        """Returns the model name to use for the given user based on their tier."""
+        if self.is_user_pro(user_id):
+            return self.pro_model_name
+        return self.default_model_name

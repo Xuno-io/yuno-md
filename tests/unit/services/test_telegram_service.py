@@ -87,6 +87,7 @@ def telegram_service() -> TelegramService:
             get_user_max_history_turns=lambda user_id: 100,
             set_user_pro_status=lambda user_id, is_pro: None,
             is_user_pro=lambda user_id: False,
+            get_user_model=lambda user_id: "gemini-3-flash-preview",
         ),
     )
     return TelegramService(

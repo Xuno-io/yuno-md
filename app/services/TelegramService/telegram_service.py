@@ -106,11 +106,6 @@ class TelegramService(TelegramServiceInterface):
             await self._handle_help_command(event)
             return
 
-        # Handle /yuno-model command
-        if raw_message_lower.startswith("/yuno-model"):
-            await self._handle_model_command(event, raw_message_stripped)
-            return
-
         # Handle /save command
         if raw_message_lower.startswith("/save"):
             await self._handle_save_command(event)
@@ -206,8 +201,8 @@ class TelegramService(TelegramServiceInterface):
             len(context),
         )
 
-        # Determine model to use
-        model_name = self.chat_repository.get_model(event.chat_id)
+        # Determine model to use based on user tier
+        model_name = self.user_service.get_user_model(event.sender_id)
 
         async with self.bot.action(event.chat_id, "typing"):
             response: str = await self.neibot.get_response(
@@ -342,8 +337,6 @@ class TelegramService(TelegramServiceInterface):
         if message_text.startswith(self.command_prefix):
             return True
         elif message_text.startswith("/help") or message_text.startswith("/start"):
-            return True
-        elif message_text.startswith("/yuno-model"):
             return True
         elif "@yunodotbot" in message_text:
             return True
@@ -551,32 +544,3 @@ class TelegramService(TelegramServiceInterface):
         except Exception as e:
             self.logger.error(f"Error in /save command: {e}", exc_info=True)
             await event.reply("Ocurrió un error al intentar guardar la memoria.")
-
-    async def _handle_model_command(self, event, raw_message: str) -> None:
-        try:
-            # Permission: only explicit admin IDs can change the model
-            if event.sender_id not in self.admin_ids:
-                await event.reply(
-                    "Solo los administradores autorizados pueden cambiar el modelo."
-                )
-                return
-
-            parts = raw_message.split()
-
-            # If no argument provided, return the current model for this chat
-            if len(parts) < 2:
-                current = self.chat_repository.get_model(event.chat_id)
-                if current:
-                    await event.reply(f"Modelo actual para este chat: {current}")
-                else:
-                    await event.reply(
-                        "No hay un modelo personalizado para este chat; se usa el modelo global por defecto."
-                    )
-                return
-
-            model_name = parts[1].strip()
-            self.chat_repository.set_model(event.chat_id, model_name)
-            await event.reply(f"Modelo actualizado a: {model_name}")
-        except Exception as e:
-            self.logger.error(f"Error setting model: {e}")
-            await event.reply("Ocurrió un error al actualizar el modelo.")
