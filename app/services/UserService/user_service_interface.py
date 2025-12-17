@@ -13,3 +13,8 @@ class UserServiceInterface(ABC):
     @abstractmethod
     def set_user_pro_status(self, user_id: int, is_pro: bool) -> None:
         pass
+
+    @abstractmethod
+    def get_user_model(self, user_id: int) -> str:
+        """Returns the model name to use for the given user based on their tier."""
+        pass

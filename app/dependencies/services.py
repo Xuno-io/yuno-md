@@ -98,10 +98,18 @@ def get_user_service(components: Components) -> UserServiceInterface:
     pro_max_history_turns = configuration.get_configuration(
         "MAX_HISTORY_TURNS_PRO", int, default=200
     )
+    default_model_name = configuration.get_configuration(
+        "MODEL_NAME", str, default="gemini-3-flash-preview"
+    )
+    pro_model_name = configuration.get_configuration(
+        "MODEL_NAME_PRO", str, default="gemini-3-pro-preview"
+    )
     return UserService(
         user_repository=get_user_repository(components),
         default_max_history_turns=default_max_history_turns,
         pro_max_history_turns=pro_max_history_turns,
+        default_model_name=default_model_name,
+        pro_model_name=pro_model_name,
     )
 
 

@@ -11,7 +11,15 @@ class TestUserService(unittest.TestCase):
         self.mock_repo = MagicMock(spec=UserRepositoryInterface)
         self.default_limit = 100
         self.pro_limit = 200
-        self.service = UserService(self.mock_repo, self.default_limit, self.pro_limit)
+        self.default_model = "gemini-3-flash-preview"
+        self.pro_model = "gemini-3-pro-preview"
+        self.service = UserService(
+            self.mock_repo,
+            self.default_limit,
+            self.pro_limit,
+            self.default_model,
+            self.pro_model,
+        )
 
     def test_get_user_max_history_turns_default(self):
         self.mock_repo.get_user.return_value = None
@@ -43,6 +51,21 @@ class TestUserService(unittest.TestCase):
     def test_is_user_pro_none(self):
         self.mock_repo.get_user.return_value = None
         self.assertFalse(self.service.is_user_pro(123))
+
+    def test_get_user_model_default(self):
+        self.mock_repo.get_user.return_value = None
+        model = self.service.get_user_model(123)
+        self.assertEqual(model, self.default_model)
+
+    def test_get_user_model_not_pro(self):
+        self.mock_repo.get_user.return_value = {"user_id": 123, "is_pro": False}
+        model = self.service.get_user_model(123)
+        self.assertEqual(model, self.default_model)
+
+    def test_get_user_model_pro(self):
+        self.mock_repo.get_user.return_value = {"user_id": 123, "is_pro": True}
+        model = self.service.get_user_model(123)
+        self.assertEqual(model, self.pro_model)
 
 
 if __name__ == "__main__":
