@@ -585,8 +585,9 @@ class TelegramService(TelegramServiceInterface):
             await event.reply("El servicio de memoria no está disponible.")
             return
 
-        # Handle /memory clear
-        if "clear" in raw_message:
+        # Handle /memory clear - explicit subcommand parsing
+        tokens = raw_message.split()
+        if len(tokens) >= 2 and tokens[1].strip().lower() == "clear":
             deleted_count = memory_service.delete_all(user_id)
             if deleted_count > 0:
                 await event.reply(f"He borrado {deleted_count} memorias sobre ti.")

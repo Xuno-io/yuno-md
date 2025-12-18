@@ -343,11 +343,10 @@ class NeibotService(NeibotServiceInterface):
                 user_id=user_id,
             )
 
-            # Count memories created
+            # Count memories created - use only the standardized "results" key
             memories_created = 0
             if isinstance(result, dict):
-                # mem0 returns {"results": [...]} or similar
-                results = result.get("results") or result.get("memories") or []
+                results = result.get("results", [])
                 memories_created = len(results) if isinstance(results, list) else 0
 
             self.logger.info(
