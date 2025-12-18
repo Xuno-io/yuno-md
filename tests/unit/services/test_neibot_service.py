@@ -275,3 +275,139 @@ class TestGetResponseHandling:
 
         assert "couldn't process your request at the moment" in result
         mock_error.assert_called()
+
+
+class TestCaptureFactsFromHistory:
+    """Test cases for capture_facts_from_history method."""
+
+    @pytest.mark.asyncio
+    async def test_capture_no_memory_service(
+        self, neibot_service: NeibotService, logger: logging.Logger
+    ) -> None:
+        """Test capture returns 0 when no memory service."""
+        neibot_service.memory_service = None
+
+        history: list[MessagePayload] = [
+            {"role": "user", "content": "I use Python", "attachments": []}
+        ]
+
+        with patch.object(logger, "warning") as mock_warning:
+            result = await neibot_service.capture_facts_from_history(
+                history, user_id="user_123"
+            )
+
+        assert result == 0
+        mock_warning.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_capture_with_memory_service(
+        self, neibot_service: NeibotService
+    ) -> None:
+        """Test capture delegates to memory service."""
+        mock_memory = MagicMock()
+        mock_memory.add.return_value = {"results": [{"id": "mem_1"}, {"id": "mem_2"}]}
+        neibot_service.memory_service = mock_memory
+
+        history: list[MessagePayload] = [
+            {"role": "user", "content": "I use Python and Redis", "attachments": []}
+        ]
+
+        result = await neibot_service.capture_facts_from_history(
+            history, user_id="user_123"
+        )
+
+        assert result == 2
+        mock_memory.add.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_capture_empty_history(self, neibot_service: NeibotService) -> None:
+        """Test capture with empty history returns 0."""
+        mock_memory = MagicMock()
+        neibot_service.memory_service = mock_memory
+
+        history: list[MessagePayload] = []
+
+        result = await neibot_service.capture_facts_from_history(
+            history, user_id="user_123"
+        )
+
+        assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_capture_handles_exception(
+        self, neibot_service: NeibotService, logger: logging.Logger
+    ) -> None:
+        """Test capture handles exceptions gracefully."""
+        mock_memory = MagicMock()
+        mock_memory.add.side_effect = Exception("Memory error")
+        neibot_service.memory_service = mock_memory
+
+        history: list[MessagePayload] = [
+            {"role": "user", "content": "Some content", "attachments": []}
+        ]
+
+        with patch.object(logger, "error") as mock_error:
+            result = await neibot_service.capture_facts_from_history(
+                history, user_id="user_123"
+            )
+
+        assert result == 0
+        mock_error.assert_called()
+
+
+class TestMemoryToolExecution:
+    """Test cases for memory tool execution."""
+
+    @pytest.mark.asyncio
+    async def test_execute_search_memory_success(
+        self, neibot_service: NeibotService
+    ) -> None:
+        """Test successful memory search execution."""
+        mock_memory = MagicMock()
+        mock_memory.search.return_value = [
+            {"memory": "[TECH_STACK] Uses Python"},
+            {"memory": "[TECH_STACK] Uses Redis"},
+        ]
+        neibot_service.memory_service = mock_memory
+
+        result = await neibot_service._execute_search_memory(
+            args={"query": "tech stack", "category": "TECH_STACK"},
+            user_id="user_123",
+        )
+
+        assert "[TECH_STACK]" in result
+        assert "Uses Python" in result
+
+    @pytest.mark.asyncio
+    async def test_execute_search_memory_no_results(
+        self, neibot_service: NeibotService
+    ) -> None:
+        """Test memory search with no results."""
+        mock_memory = MagicMock()
+        mock_memory.search.return_value = []
+        neibot_service.memory_service = mock_memory
+
+        result = await neibot_service._execute_search_memory(
+            args={"query": "unknown topic", "category": "TECH_STACK"},
+            user_id="user_123",
+        )
+
+        assert "No relevant memories found" in result
+
+    @pytest.mark.asyncio
+    async def test_execute_search_memory_handles_exception(
+        self, neibot_service: NeibotService, logger: logging.Logger
+    ) -> None:
+        """Test memory search handles exceptions."""
+        mock_memory = MagicMock()
+        mock_memory.search.side_effect = Exception("Search failed")
+        neibot_service.memory_service = mock_memory
+
+        with patch.object(logger, "error") as mock_error:
+            result = await neibot_service._execute_search_memory(
+                args={"query": "test", "category": None},
+                user_id="user_123",
+            )
+
+        assert "failed" in result.lower()
+        mock_error.assert_called()

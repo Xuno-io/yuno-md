@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import base64
 import logging
 from io import BytesIO
@@ -59,6 +60,7 @@ class TelegramService(TelegramServiceInterface):
         self.chat_repository = chat_repository
         self.user_service = user_service
         self.admin_ids = admin_ids
+
         self.logger.info(
             "TelegramService initialized with command prefix '%s'",
             self.command_prefix,
@@ -106,9 +108,14 @@ class TelegramService(TelegramServiceInterface):
             await self._handle_help_command(event)
             return
 
-        # Handle /save command
+        # Handle /save command (manual memory extraction)
         if raw_message_lower.startswith("/save"):
             await self._handle_save_command(event)
+            return
+
+        # Handle /memory command (view/manage stored facts)
+        if raw_message_lower.startswith("/memory"):
+            await self._handle_memory_command(event)
             return
 
         message = getattr(event, "message", None) or event
@@ -338,6 +345,8 @@ class TelegramService(TelegramServiceInterface):
             return True
         elif message_text.startswith("/help") or message_text.startswith("/start"):
             return True
+        elif message_text.startswith("/save") or message_text.startswith("/memory"):
+            return True
         elif "@yunodotbot" in message_text:
             return True
 
@@ -544,3 +553,90 @@ class TelegramService(TelegramServiceInterface):
         except Exception as e:
             self.logger.error(f"Error in /save command: {e}", exc_info=True)
             await event.reply("Ocurrió un error al intentar guardar la memoria.")
+
+    async def _handle_memory_command(self, event) -> None:
+        """
+        Allows users to view and manage their stored memories.
+
+        Usage:
+            /memory         - List all stored memories
+            /memory clear   - Delete all memories for this user
+        """
+        try:
+            user_id = str(event.sender_id)
+            raw_message = (event.raw_text or "").strip().lower()
+
+            if hasattr(self.neibot, "memory_service") and self.neibot.memory_service:
+                await self._handle_memory_command_mem0(event, user_id, raw_message)
+                return
+
+            await event.reply("El servicio de memoria no está disponible.")
+
+        except Exception as e:
+            self.logger.error(f"Error in /memory command: {e}", exc_info=True)
+            await event.reply("Ocurrió un error al consultar la memoria.")
+
+    async def _handle_memory_command_mem0(
+        self, event, user_id: str, raw_message: str
+    ) -> None:
+        """Handle /memory using mem0 (new system)."""
+        memory_service = self.neibot.memory_service
+        if memory_service is None:
+            await event.reply("El servicio de memoria no está disponible.")
+            return
+
+        # Handle /memory clear - explicit subcommand parsing
+        tokens = raw_message.split()
+        if len(tokens) >= 2 and tokens[1].strip().lower() == "clear":
+            deleted_count = memory_service.delete_all(user_id)
+            if deleted_count > 0:
+                await event.reply(f"He borrado {deleted_count} memorias sobre ti.")
+            else:
+                await event.reply("No tienes memorias guardadas.")
+            return
+
+        # Default: list memories
+        memories = memory_service.get_all(user_id)
+
+        if not memories:
+            await event.reply(
+                "No tengo memorias guardadas sobre ti aún.\n\n"
+                "Usa /save para guardar datos de nuestra conversación."
+            )
+            return
+
+        # Format memories by category
+        by_category: dict[str, list[str]] = {
+            "TECH_STACK": [],
+            "BUSINESS_LOGIC": [],
+            "USER_CONSTRAINTS": [],
+            "OTHER": [],
+        }
+
+        # Categories are embedded in the text as "[CATEGORY] text"
+        from app.services.MemoryService.memory_service import parse_embedded_category
+
+        for mem in memories:
+            text = mem.get("memory") or mem.get("text", "")
+            category, clean_text = parse_embedded_category(text)
+            if category not in by_category:
+                category = "OTHER"
+            by_category[category].append(f"• {clean_text}")
+
+        # Build response
+        response_parts = ["🧠 **Tu memoria en Yuno:**\n"]
+
+        category_labels = {
+            "TECH_STACK": "💻 **Stack Técnico**",
+            "BUSINESS_LOGIC": "📋 **Lógica de Negocio**",
+            "USER_CONSTRAINTS": "⚠️ **Restricciones**",
+            "OTHER": "📝 **Otros**",
+        }
+
+        for cat, label in category_labels.items():
+            if by_category[cat]:
+                response_parts.append(f"\n{label}")
+                response_parts.extend(by_category[cat])
+
+        response_parts.append("\n\n_Usa /memory clear para borrar todo._")
+        await event.reply("\n".join(response_parts))
