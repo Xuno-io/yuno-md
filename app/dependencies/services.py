@@ -4,10 +4,9 @@ from pathlib import Path
 from app.bootstrap.components import Components
 from app.services.NeibotService.neibot_service_interface import NeibotServiceInterface
 from app.services.NeibotService.neibot_service import NeibotService
-from app.services.KnowledgeService.knowledge_service_interface import (
-    KnowledgeServiceInterface,
-)
-from app.services.KnowledgeService.knowledge_service import KnowledgeService
+
+from app.services.MemoryService.memory_service_interface import MemoryServiceInterface
+from app.services.MemoryService.memory_service import MemoryService
 from app.services.TelegramService.telegram_service import TelegramService
 from app.services.TelegramService.telegram_service_interface import (
     TelegramServiceInterface,
@@ -66,6 +65,11 @@ def get_neibot_service(components: Components) -> NeibotServiceInterface:
         cache_threshold_val if cache_threshold_val is not None else 2048
     )
 
+    # Model for memory extraction (fast, cheap, structured output)
+    extraction_model = configuration.get_configuration(
+        "EXTRACTION_MODEL_NAME", str, default="gemini-3-flash-preview"
+    )
+
     return NeibotService(
         system_prompt=system_prompt,
         model_name=model_name,
@@ -75,18 +79,40 @@ def get_neibot_service(components: Components) -> NeibotServiceInterface:
         max_tokens=max_tokens,
         cache_threshold=cache_threshold,
         logger=components.get_component(LoggerInterface).get_logger("NeibotService"),
-        knowledge_service=get_knowledge_service(components),
+        memory_service=get_memory_service(components),
+        extraction_model_name=extraction_model,
     )
 
 
-def get_knowledge_service(components: Components) -> KnowledgeServiceInterface:
+def get_memory_service(components: Components) -> MemoryServiceInterface:
+    """
+    Create the mem0-based memory service with Redis backend.
+
+    Environment variables:
+        REDIS_HOST: Redis host (default: localhost)
+        REDIS_PORT: Redis port (default: 6379)
+        GOOGLE_API_KEY: Required for embeddings
+    """
     configuration = components.get_component(ConfigurationInterface)
     logger = components.get_component(LoggerInterface)
-    return KnowledgeService(
-        base_url=configuration.get_configuration(
-            "KNOWLEDGE_BASE_URL", str, default="http://127.0.0.1:8088"
-        ),
-        logger=logger.get_logger("KnowledgeService"),
+
+    redis_host = configuration.get_configuration("REDIS_HOST", str, default="localhost")
+    redis_port = configuration.get_configuration("REDIS_PORT", int, default=6379)
+
+    # Model for memory operations
+    memory_llm_model = configuration.get_configuration(
+        "MEMORY_LLM_MODEL", str, default="gemini-2.0-flash"
+    )
+    memory_embedder_model = configuration.get_configuration(
+        "MEMORY_EMBEDDER_MODEL", str, default="text-embedding-004"
+    )
+
+    return MemoryService(
+        logger=logger.get_logger("MemoryService"),
+        redis_host=redis_host,
+        redis_port=redis_port,
+        llm_model=memory_llm_model,
+        embedder_model=memory_embedder_model,
     )
 
 

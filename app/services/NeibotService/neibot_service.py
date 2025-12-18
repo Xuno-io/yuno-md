@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import base64
-import json
 from datetime import datetime, timezone
 
 from google import genai
@@ -11,8 +10,41 @@ from langfuse import observe
 
 from app.entities.message import MessagePayload
 from app.services.NeibotService.neibot_service_interface import NeibotServiceInterface
-from app.services.KnowledgeService.knowledge_service_interface import (
-    KnowledgeServiceInterface,
+from app.services.MemoryService.memory_service_interface import MemoryServiceInterface
+
+
+# Tool definition for memory search
+SEARCH_MEMORY_TOOL = types.Tool(
+    function_declarations=[
+        types.FunctionDeclaration(
+            name="search_memory",
+            description=(
+                "Search long-term memory for project-specific facts about this user. "
+                "Use ONLY when the user asks about their specific project details, "
+                "past decisions, or constraints. DO NOT use for greetings or general knowledge."
+            ),
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "query": types.Schema(
+                        type=types.Type.STRING,
+                        description="The specific question or topic to search for",
+                    ),
+                    "category": types.Schema(
+                        type=types.Type.STRING,
+                        enum=["TECH_STACK", "BUSINESS_LOGIC", "USER_CONSTRAINTS"],
+                        description=(
+                            "The memory category to search in. "
+                            "TECH_STACK for code/infra, "
+                            "BUSINESS_LOGIC for rules/budgets, "
+                            "USER_CONSTRAINTS for limitations."
+                        ),
+                    ),
+                },
+                required=["query", "category"],
+            ),
+        )
+    ]
 )
 
 
@@ -31,21 +63,23 @@ class NeibotService(NeibotServiceInterface):
         max_tokens: int,
         logger: logging.Logger,
         cache_threshold: int = 2048,
-        knowledge_service: KnowledgeServiceInterface | None = None,
+        memory_service: MemoryServiceInterface | None = None,
+        extraction_model_name: str | None = None,
     ) -> None:
         """
         Initialize the service with Google Gen AI configuration.
 
         Args:
             system_prompt: System instructions and personality
-            model_name: Default model name
+            model_name: Default model name for conversations
             location: Vertex AI location (e.g., "us-central1")
             project_id: GCP Project ID (optional)
             temperature: Model temperature
             max_tokens: Max tokens for generation
             logger: Logger instance
             cache_threshold: Token threshold (unused in this version, kept for interface)
-            knowledge_service: Optional service for accessing the knowledge base
+            memory_service: mem0-based memory service for long-term memory
+            extraction_model_name: Model for fact extraction (defaults to gemini-2.0-flash)
         """
         self.system_prompt = system_prompt
         self.model_name = model_name
@@ -55,7 +89,9 @@ class NeibotService(NeibotServiceInterface):
         self.max_tokens = max_tokens
         self.logger = logger
         self.cache_threshold = cache_threshold
-        self.knowledge_service = knowledge_service
+        self.memory_service = memory_service
+        # Use a fast, cheap model for extraction tasks (structured output, no deep reasoning)
+        self.extraction_model_name = extraction_model_name or "gemini-2.0-flash"
 
         # Initialize Google Gen AI Client (Vertex AI backend)
         self.client = genai.Client(
@@ -76,12 +112,15 @@ class NeibotService(NeibotServiceInterface):
         user_id: str | None = None,
     ) -> str:
         """
-        Get a response using Google Gen AI SDK.
+        Get a response using Google Gen AI SDK with tool execution support.
+
+        The LLM can use the search_memory tool to query long-term memory
+        when it needs context about the user's project or past decisions.
 
         Args:
             history: List of MessagePayload objects with role, content, and attachments
             model_name: Optional model name to override the default
-            user_id: Optional user ID to fetch knowledge context
+            user_id: Optional user ID for memory operations
 
         Returns:
             The assistant's response
@@ -94,39 +133,27 @@ class NeibotService(NeibotServiceInterface):
             if current_model != self.model_name:
                 self.logger.info(f"Using custom model {current_model}")
 
-            # Fetch knowledge context if user_id is provided
-            knowledge_context = ""
-            if user_id and self.knowledge_service:
-                try:
-                    # Query all active facts for this entity
-                    facts = self.knowledge_service.query(
-                        {"entity": user_id, "active_only": True}
-                    )
-                    if facts:
-                        facts_list = [
-                            f"- {f.get('attribute')}: {f.get('value')}" for f in facts
-                        ]
-                        knowledge_context = "\n\n[MEMORY CONTEXT]\n" + "\n".join(
-                            facts_list
-                        )
-                        self.logger.info(
-                            f"Injected {len(facts)} facts for user {user_id}"
-                        )
-                except Exception as e:
-                    self.logger.warning(f"Failed to fetch knowledge context: {e}")
-
             # Add current UTC time to system prompt
             utc_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-            system_prompt_with_time = f"{self.system_prompt}\n\nCurrent time (UTC): {utc_time}{knowledge_context}"
+            system_prompt_with_time = (
+                f"{self.system_prompt}\n\nCurrent time (UTC): {utc_time}"
+            )
+
+            # Build tools list - use memory search if memory_service is available
+            # Note: Google Search disabled - can't mix search tools with function calling
+            tools_list = []
+            if self.memory_service and user_id:
+                tools_list.append(SEARCH_MEMORY_TOOL)
 
             # Configure generation parameters
             config = types.GenerateContentConfig(
                 temperature=self.temperature,
                 max_output_tokens=self.max_tokens,
                 system_instruction=system_prompt_with_time,
-                tools=[types.Tool(google_search=types.GoogleSearch())],
+                tools=tools_list,
             )
 
+            # First LLM call
             response = await self.client.aio.models.generate_content(
                 model=current_model,
                 contents=contents,
@@ -137,15 +164,26 @@ class NeibotService(NeibotServiceInterface):
                 self.logger.warning("Received empty response from Google Gen AI")
                 return ""
 
-            # Google Gen AI response handling
-            if response.text:
+            # Check for function call (tool use)
+            if await self._handle_tool_calls(
+                response, contents, current_model, config, user_id
+            ):
+                # Tool was called, make second call with results
+                response = await self.client.aio.models.generate_content(
+                    model=current_model,
+                    contents=contents,
+                    config=config,
+                )
+
+            # Extract final text response
+            if response and response.text:
                 return response.text
 
             # Check for safety blocking if no text
             if (
-                response.candidates
-                and response.candidates[0].finish_reason
-                == "SAFETY"  # Check constant value if available, using string literal for robustness
+                response
+                and response.candidates
+                and response.candidates[0].finish_reason == "SAFETY"
             ):
                 self.logger.warning(
                     f"Response blocked due to safety: {response.candidates[0].safety_ratings}"
@@ -162,6 +200,102 @@ class NeibotService(NeibotServiceInterface):
             )
             return "I'm sorry, I couldn't process your request at the moment."
 
+    async def _handle_tool_calls(
+        self,
+        response,
+        contents: list[types.Content],
+        model: str,
+        config: types.GenerateContentConfig,
+        user_id: str | None,
+    ) -> bool:
+        """
+        Handle function calls from the LLM response.
+
+        Returns True if a tool was called and contents were updated.
+        """
+        if not response.candidates:
+            return False
+
+        candidate = response.candidates[0]
+        if not candidate.content or not candidate.content.parts:
+            return False
+
+        tool_called = False
+
+        for part in candidate.content.parts:
+            if not hasattr(part, "function_call") or not part.function_call:
+                continue
+
+            function_call = part.function_call
+            function_name = function_call.name
+
+            self.logger.info(f"LLM requested tool: {function_name}")
+
+            if function_name == "search_memory" and self.memory_service and user_id:
+                # Execute memory search
+                result = await self._execute_search_memory(function_call.args, user_id)
+
+                # Add the function call and response to contents
+                contents.append(types.Content(role="model", parts=[part]))
+                contents.append(
+                    types.Content(
+                        role="user",
+                        parts=[
+                            types.Part.from_function_response(
+                                name="search_memory",
+                                response={"result": result},
+                            )
+                        ],
+                    )
+                )
+                tool_called = True
+
+        return tool_called
+
+    async def _execute_search_memory(self, args: dict, user_id: str) -> str:
+        """
+        Execute a memory search and return formatted results.
+        """
+        query = args.get("query", "")
+        category = args.get("category")
+
+        self.logger.info(
+            f"Searching memory for user {user_id}: query='{query}', category={category}"
+        )
+
+        try:
+            if self.memory_service is None:
+                return "Memory service not available."
+            memories = self.memory_service.search(
+                query=query,
+                user_id=user_id,
+                category=category,
+                limit=5,
+            )
+
+            if not memories:
+                return "No relevant memories found for this query."
+
+            # Format memories for the LLM
+            # Categories are embedded in the text as "[CATEGORY] text"
+            from app.services.MemoryService.memory_service import (
+                parse_embedded_category,
+            )
+
+            formatted = []
+            for mem in memories:
+                text = mem.get("memory") or mem.get("text", "")
+                cat, clean_text = parse_embedded_category(text)
+                formatted.append(f"[{cat}] {clean_text}")
+
+            result = "\n".join(formatted)
+            self.logger.info(f"Found {len(memories)} memories for query '{query}'")
+            return result
+
+        except Exception as e:
+            self.logger.error(f"Memory search failed: {e}")
+            return f"Memory search failed: {str(e)}"
+
     @observe()
     async def capture_facts_from_history(
         self,
@@ -169,72 +303,62 @@ class NeibotService(NeibotServiceInterface):
         user_id: str,
     ) -> int:
         """
-        Analyze history, extract facts, and save them to the knowledge base.
-        Returns the number of facts saved.
-        """
-        if not self.knowledge_service:
-            self.logger.warning("Knowledge service not available for capturing facts.")
-            return 0
+        Analyze conversation history and save memories using mem0.
 
+        Returns the number of memories processed.
+        """
+        if not self.memory_service:
+            self.logger.warning("No memory service available.")
+            return 0
+        return await self._capture_with_mem0(history, user_id)
+
+    async def _capture_with_mem0(
+        self,
+        history: list[MessagePayload],
+        user_id: str,
+    ) -> int:
+        """
+        Capture memories using mem0 (new system).
+
+        mem0's custom_prompt handles:
+        - Filtering trivial facts
+        - Categorizing into TECH_STACK, BUSINESS_LOGIC, USER_CONSTRAINTS
+        """
         try:
-            # Prepare conversation text
+            # Build conversation text
             conversation_text = ""
             for msg in history:
                 role = msg.get("role", "user").upper()
                 content = msg.get("content", "")
                 conversation_text += f"{role}: {content}\n"
 
-            prompt = (
-                f"Analyze the following conversation history and extract stable facts about the USER (id: {user_id}).\n"
-                "Ignore trivial details, greetings, or temporary context.\n"
-                "Focus on: names, preferences, job, location, interests, specific relationships.\n"
-                "Return the output as a JSON list of objects. Each object must have:\n"
-                "  - 'attribute': string (snake_case key, e.g., 'user_name', 'favorite_color')\n"
-                "  - 'value': string, number, or boolean (the fact value)\n"
-                "  - 'confidence': number (0.0 to 1.0)\n"
-                "If no facts are found, return an empty list [].\n\n"
-                "Conversation:\n"
-                f"{conversation_text}"
-            )
-
-            config = types.GenerateContentConfig(
-                temperature=0.0,
-                max_output_tokens=2048,
-                response_mime_type="application/json",
-            )
-
-            response = await self.client.aio.models.generate_content(
-                model=self.model_name,
-                contents=[
-                    types.Content(
-                        role="user", parts=[types.Part.from_text(text=prompt)]
-                    )
-                ],
-                config=config,
-            )
-
-            if not response.text:
+            if not conversation_text.strip():
                 return 0
 
-            facts = json.loads(response.text)
-            if not isinstance(facts, list):
+            # memory_service is checked in capture_facts_from_history
+            if self.memory_service is None:
                 return 0
+            result = self.memory_service.add(
+                content=conversation_text,
+                user_id=user_id,
+            )
 
-            saved_count = 0
-            for fact in facts:
-                if not isinstance(fact, dict) or fact.get("confidence", 0) <= 0.7:
-                    continue
+            # Count memories created
+            memories_created = 0
+            if isinstance(result, dict):
+                # mem0 returns {"results": [...]} or similar
+                results = result.get("results") or result.get("memories") or []
+                memories_created = len(results) if isinstance(results, list) else 0
 
-                attr = fact.get("attribute")
-                val = fact.get("value")
-                if attr and val is not None:
-                    if self.knowledge_service.add_fact(user_id, attr, val):
-                        saved_count += 1
-
-            return saved_count
+            self.logger.info(
+                "mem0 processed conversation for user %s: %s memories",
+                user_id,
+                memories_created,
+            )
+            return memories_created
 
         except Exception as e:
-            self.logger.error(f"Error capturing facts: {e}", exc_info=True)
+            self.logger.error(f"Error capturing with mem0: {e}", exc_info=True)
             return 0
 
     def _build_contents(self, history: list[MessagePayload]) -> list[types.Content]:

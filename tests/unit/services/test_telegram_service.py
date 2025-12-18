@@ -2,9 +2,10 @@ import asyncio
 import base64
 import logging
 from types import SimpleNamespace
+from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
-from typing import cast
 
 from app.entities.message import ImageAttachment, MessagePayload
 
@@ -22,6 +23,8 @@ from app.services.UserService.user_service_interface import UserServiceInterface
 
 
 class DummyNeibot(NeibotServiceInterface):
+    memory_service: Any = None
+
     async def get_response(
         self,
         history: list[MessagePayload],
@@ -301,10 +304,16 @@ def test_merge_attachment_lists_deduplicates(
 
 
 class MockEvent:
-    def __init__(self):
-        self.replied_message = None
+    """Mock Telegram event for testing."""
 
-    async def reply(self, message):
+    def __init__(self) -> None:
+        self.replied_message: str | None = None
+        self.sender_id: int = 0
+        self.chat_id: int = 0
+        self.reply_to_msg_id: int | None = None
+        self.raw_text: str = ""
+
+    async def reply(self, message: str) -> None:
         self.replied_message = message
 
 
@@ -312,5 +321,149 @@ def test_handle_help_command(telegram_service: TelegramService) -> None:
     event = MockEvent()
     asyncio.run(telegram_service._handle_help_command(event))
 
+    assert event.replied_message is not None
     assert "¡Hola! Soy Yuno." in event.replied_message
     assert "hilos de conversación" in event.replied_message
+
+
+class TestHandleSaveCommand:
+    """Tests for the /save command handler."""
+
+    def test_save_command_no_memory_service(
+        self, telegram_service: TelegramService
+    ) -> None:
+        """Test /save when memory service not available."""
+        # Neibot has no memory_service
+        cast(Any, telegram_service.neibot).memory_service = None
+        cast(Any, telegram_service.neibot).capture_facts_from_history = AsyncMock(
+            return_value=0
+        )
+
+        event = MockEvent()
+        event.sender_id = 123
+        event.chat_id = 456
+        event.reply_to_msg_id = None
+        event.raw_text = "/save"
+
+        # Mock typing action context manager
+        telegram_service.bot = SimpleNamespace(
+            action=lambda chat_id, action: AsyncContextManager(),
+            get_messages=AsyncMock(return_value=None),
+        )
+
+        asyncio.run(telegram_service._handle_save_command(event))
+
+        assert event.replied_message is not None
+        assert (
+            "No encontré nuevos datos" in event.replied_message
+            or "Analizando" in event.replied_message
+        )
+
+    def test_save_command_with_saved_facts(
+        self, telegram_service: TelegramService
+    ) -> None:
+        """Test /save when facts are saved."""
+        cast(Any, telegram_service.neibot).capture_facts_from_history = AsyncMock(
+            return_value=3
+        )
+
+        event = MockEvent()
+        event.sender_id = 123
+        event.chat_id = 456
+        event.reply_to_msg_id = None
+        event.raw_text = "/save"
+
+        telegram_service.bot = SimpleNamespace(
+            action=lambda chat_id, action: AsyncContextManager(),
+            get_messages=AsyncMock(return_value=None),
+        )
+
+        asyncio.run(telegram_service._handle_save_command(event))
+
+        # Should have at least started the process
+        assert event.replied_message is not None
+
+
+class TestHandleMemoryCommand:
+    """Tests for the /memory command handler."""
+
+    def test_memory_command_no_service(self, telegram_service: TelegramService) -> None:
+        """Test /memory when no memory service available."""
+        cast(Any, telegram_service.neibot).memory_service = None
+
+        event = MockEvent()
+        event.sender_id = 123
+        event.raw_text = "/memory"
+
+        asyncio.run(telegram_service._handle_memory_command(event))
+
+        assert event.replied_message is not None
+        assert "no está disponible" in event.replied_message
+
+    def test_memory_command_empty_memories(
+        self, telegram_service: TelegramService
+    ) -> None:
+        """Test /memory when user has no memories."""
+        mock_memory_service = SimpleNamespace(
+            get_all=lambda user_id: [],
+            delete_all=lambda user_id: 0,
+        )
+        cast(Any, telegram_service.neibot).memory_service = mock_memory_service
+
+        event = MockEvent()
+        event.sender_id = 123
+        event.raw_text = "/memory"
+
+        asyncio.run(telegram_service._handle_memory_command(event))
+
+        assert event.replied_message is not None
+        assert "No tengo memorias guardadas" in event.replied_message
+
+    def test_memory_command_with_memories(
+        self, telegram_service: TelegramService
+    ) -> None:
+        """Test /memory when user has memories."""
+        mock_memory_service = SimpleNamespace(
+            get_all=lambda user_id: [
+                {"memory": "[TECH_STACK] Uses Python"},
+                {"memory": "[BUSINESS_LOGIC] Budget is 500"},
+            ],
+        )
+        cast(Any, telegram_service.neibot).memory_service = mock_memory_service
+
+        event = MockEvent()
+        event.sender_id = 123
+        event.raw_text = "/memory"
+
+        asyncio.run(telegram_service._handle_memory_command(event))
+
+        assert event.replied_message is not None
+        assert "Tu memoria en Yuno" in event.replied_message
+        assert "Stack Técnico" in event.replied_message
+
+    def test_memory_clear_command(self, telegram_service: TelegramService) -> None:
+        """Test /memory clear command."""
+        mock_memory_service = SimpleNamespace(
+            delete_all=lambda user_id: 5,
+        )
+        cast(Any, telegram_service.neibot).memory_service = mock_memory_service
+
+        event = MockEvent()
+        event.sender_id = 123
+        event.raw_text = "/memory clear"
+
+        asyncio.run(telegram_service._handle_memory_command(event))
+
+        assert event.replied_message is not None
+        assert "borrado" in event.replied_message
+        assert "5" in event.replied_message
+
+
+class AsyncContextManager:
+    """Async context manager stub for bot.action."""
+
+    async def __aenter__(self) -> "AsyncContextManager":
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        pass

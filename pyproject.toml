@@ -32,6 +32,7 @@ google-genai = "^1.52.0"
 openai = "^2.8.1"
 openinference-instrumentation-google-genai = "^0.1.8"
 tenacity = "^9.1.2"
+mem0ai = "^0.1.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "7.4.4"
