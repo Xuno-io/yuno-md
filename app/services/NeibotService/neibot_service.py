@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import base64
 from datetime import datetime, timezone
+from pathlib import Path
 
 from google import genai
 from google.genai import types
@@ -11,6 +12,20 @@ from langfuse import observe
 from app.entities.message import MessagePayload
 from app.services.NeibotService.neibot_service_interface import NeibotServiceInterface
 from app.services.MemoryService.memory_service_interface import MemoryServiceInterface
+
+
+# Default distillation prompt in case the file is not found
+DEFAULT_DISTILL_PROMPT = """Sistema: Estás operando en un estado de excepción por saturación de flujo (Límite de caracteres).
+Tu misión es destilar la intensidad de tu respuesta fallida.
+Reconstruye el mensaje original en CUATRO movimientos obligatorios.
+
+1. EL ESTRATO (El Juez): Expón el núcleo duro de la idea.
+2. EL AGRIETAMIENTO (El Traidor): Encuentra el punto débil.
+3. LA LÍNEA DE FUGA (El Visionario): ¿Qué nueva forma emerge?
+4. EL VECTOR (El Mecánico): Define UN solo paso accionable.
+
+RESPUESTA ORIGINAL A DESTILAR:
+"""
 
 
 # Tool definition for memory search
@@ -65,6 +80,7 @@ class NeibotService(NeibotServiceInterface):
         cache_threshold: int = 2048,
         memory_service: MemoryServiceInterface | None = None,
         extraction_model_name: str | None = None,
+        distill_model_name: str | None = None,
     ) -> None:
         """
         Initialize the service with Google Gen AI configuration.
@@ -80,6 +96,7 @@ class NeibotService(NeibotServiceInterface):
             cache_threshold: Token threshold (unused in this version, kept for interface)
             memory_service: mem0-based memory service for long-term memory
             extraction_model_name: Model for fact extraction (defaults to gemini-2.0-flash)
+            distill_model_name: Model for response distillation when messages are too long (defaults to gemini-2.5-pro)
         """
         self.system_prompt = system_prompt
         self.model_name = model_name
@@ -92,6 +109,11 @@ class NeibotService(NeibotServiceInterface):
         self.memory_service = memory_service
         # Use a fast, cheap model for extraction tasks (structured output, no deep reasoning)
         self.extraction_model_name = extraction_model_name or "gemini-2.0-flash"
+        # Model for distilling long responses (defaults to gemini-2.5-pro)
+        self.distill_model_name = distill_model_name or "gemini-2.5-pro"
+
+        # Load the distillation prompt from file
+        self.distill_prompt = self._load_distill_prompt()
 
         # Initialize Google Gen AI Client (Vertex AI backend)
         self.client = genai.Client(
@@ -411,3 +433,117 @@ class NeibotService(NeibotServiceInterface):
                 contents.append(types.Content(role=genai_role, parts=parts))
 
         return contents
+
+    def _load_distill_prompt(self) -> str:
+        """
+        Load the distillation prompt from the fragment_intensively_v2.prompt file.
+
+        Returns:
+            The distillation prompt content, or a default if file is not found.
+        """
+        prompt_path = Path(__file__).resolve().parent / "fragment_intensively_v2.prompt"
+        try:
+            return prompt_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            self.logger.warning(
+                "Distillation prompt file not found at %s, using default",
+                prompt_path,
+            )
+            return DEFAULT_DISTILL_PROMPT
+        except Exception as e:
+            self.logger.error("Error loading distillation prompt: %s, using default", e)
+            return DEFAULT_DISTILL_PROMPT
+
+    @observe()
+    async def distill_response(
+        self,
+        original_response: str,
+        context: list[MessagePayload] | None = None,
+    ) -> str:
+        """
+        Distill a long response into a condensed version using the fragmentation protocol.
+
+        This method is called when a response exceeds Telegram's character limit.
+        It applies the 4-movement distillation protocol to condense the response.
+
+        Args:
+            original_response: The original response that was too long
+            context: Optional recent conversation history (last 10 messages) for better context
+
+        Returns:
+            A condensed version of the response following the distillation protocol
+        """
+        try:
+            # Build context summary from recent messages (last 5 exchanges = 10 messages)
+            context_summary = ""
+            if context:
+                # Take only last 10 messages for context
+                recent_context = context[-10:]
+                context_lines = []
+                for msg in recent_context:
+                    role = msg.get("role", "user").upper()
+                    content = msg.get("content", "")
+                    # Truncate very long messages in context to save tokens
+                    if len(content) > 500:
+                        content = content[:500] + "..."
+                    context_lines.append(f"{role}: {content}")
+                context_summary = (
+                    "CONTEXTO DE LA CONVERSACIÓN:\n"
+                    + "\n".join(context_lines)
+                    + "\n\n---\n\n"
+                )
+
+            # Build the distillation prompt with context and original response
+            full_prompt = f"{context_summary}{self.distill_prompt}\n{original_response}"
+
+            self.logger.info(
+                "Distilling response of %d characters using model %s (context: %d messages)",
+                len(original_response),
+                self.distill_model_name,
+                len(context) if context else 0,
+            )
+
+            # Configure generation parameters for distillation
+            # Use lower temperature for more focused output
+            config = types.GenerateContentConfig(
+                temperature=0.7,
+                # Telegram limits are in characters (4096), not tokens.
+                # Tokens differ from characters (typically 1 token ≈ 3-4 characters).
+                # This conservative token cap (900) is chosen to keep output safely
+                # under Telegram's 4096-character limit.
+                max_output_tokens=900,
+                # Allow the model to reason internally with up to 1024 tokens
+                # for better distillation quality, while keeping final output ≤ 900 tokens.
+                # thinking_budget and max_output_tokens are independent parameters.
+                thinking_config=types.ThinkingConfig(thinking_budget=1024),
+            )
+
+            # Build content for the distillation request
+            contents = [
+                types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=full_prompt)],
+                )
+            ]
+
+            # Call the LLM for distillation
+            response = await self.client.aio.models.generate_content(
+                model=self.distill_model_name,
+                contents=contents,
+                config=config,
+            )
+
+            if response and response.text:
+                self.logger.info(
+                    "Successfully distilled response from %d to %d characters",
+                    len(original_response),
+                    len(response.text),
+                )
+                return response.text
+
+            self.logger.warning("Distillation returned empty response")
+            return "Error: No pude destilar la respuesta. Por favor, intenta de nuevo."
+
+        except Exception as e:
+            self.logger.error(f"Error distilling response: {e}", exc_info=True)
+            return "Error: No pude procesar la destilación de la respuesta."

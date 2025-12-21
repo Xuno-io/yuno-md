@@ -70,6 +70,11 @@ def get_neibot_service(components: Components) -> NeibotServiceInterface:
         "EXTRACTION_MODEL_NAME", str, default="gemini-3-flash-preview"
     )
 
+    # Model for response distillation when messages exceed Telegram's limit
+    distill_model = configuration.get_configuration(
+        "DISTILL_MODEL_NAME", str, default="gemini-2.5-pro"
+    )
+
     return NeibotService(
         system_prompt=system_prompt,
         model_name=model_name,
@@ -81,6 +86,7 @@ def get_neibot_service(components: Components) -> NeibotServiceInterface:
         logger=components.get_component(LoggerInterface).get_logger("NeibotService"),
         memory_service=get_memory_service(components),
         extraction_model_name=extraction_model,
+        distill_model_name=distill_model,
     )
 
 

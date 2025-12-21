@@ -7,6 +7,7 @@ from io import BytesIO
 from typing import Any, Literal, cast
 
 from telethon import TelegramClient, events
+from telethon.errors import MessageTooLongError
 
 from app.entities.message import ImageAttachment, MessagePayload
 from app.services.NeibotService.neibot_service_interface import NeibotServiceInterface
@@ -17,6 +18,9 @@ from app.services.UserService.user_service_interface import UserServiceInterface
 from app.repositories.chat_repository.chat_repository_interface import (
     ChatRepositoryInterface,
 )
+
+# Telegram message character limit
+TELEGRAM_MESSAGE_LIMIT = 4096
 
 
 class ImageProcessingError(Exception):
@@ -216,7 +220,51 @@ class TelegramService(TelegramServiceInterface):
                 context, model_name=model_name, user_id=str(event.sender_id)
             )
 
-        await event.reply(response)
+        try:
+            await event.reply(response)
+        except MessageTooLongError:
+            self.logger.warning(
+                "Response too long (%d chars), activating distillation protocol",
+                len(response),
+            )
+            # Activate the distillation protocol to condense the response
+            # Pass last 10 messages (5 exchanges) for context
+            async with self.bot.action(event.chat_id, "typing"):
+                distilled_response = await self.neibot.distill_response(
+                    response, context=context[-10:]
+                )
+
+            # Defensive handling: distilled_response might still exceed Telegram's limit
+            try:
+                await event.reply(distilled_response)
+            except MessageTooLongError:
+                self.logger.warning(
+                    "Distilled response still too long (%d chars), truncating to %d chars",
+                    len(distilled_response),
+                    TELEGRAM_MESSAGE_LIMIT,
+                )
+                # Truncate preserving the end (most important information is usually at the end)
+                # Reserve space for truncation notice
+                truncation_notice = (
+                    "\n\n[... mensaje truncado por límite de caracteres]"
+                )
+                max_content_length = TELEGRAM_MESSAGE_LIMIT - len(truncation_notice)
+                truncated_response = (
+                    distilled_response[-max_content_length:] + truncation_notice
+                )
+                await event.reply(truncated_response)
+            except Exception as e:
+                self.logger.error(
+                    "Failed to send distilled response (%d chars): %s",
+                    len(distilled_response),
+                    str(e),
+                    exc_info=True,
+                )
+                # Send a fallback message to inform the user
+                await event.reply(
+                    "Lo siento, hubo un error al enviar la respuesta destilada. "
+                    "Por favor, intenta reformular tu pregunta de manera más específica."
+                )
 
     async def __build_metadata(self, event) -> str:
         chat = await event.get_chat()
@@ -347,7 +395,7 @@ class TelegramService(TelegramServiceInterface):
             return True
         elif message_text.startswith("/save") or message_text.startswith("/memory"):
             return True
-        elif "@yunodotbot" in message_text:
+        elif "@yunoaidotcom" in message_text:
             return True
 
         if event.reply_to_msg_id:

@@ -9,6 +9,6 @@
     "SQLITE_DB_PATH": "neibot_database.sqlite",
     "MAX_HISTORY_TURNS": 50,
     "MAX_HISTORY_TURNS_PRO": 20,
-    "COMMAND_PREFIX": "/yuno",
+    "COMMAND_PREFIX": "/xuno",
     "CACHE_TOKEN_THRESHOLD": 2048
 }
