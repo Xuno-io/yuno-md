@@ -6,6 +6,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
+from telethon.errors import MessageTooLongError
 
 from app.entities.message import ImageAttachment, MessagePayload
 
@@ -38,6 +39,13 @@ class DummyNeibot(NeibotServiceInterface):
         history: list[MessagePayload],
         user_id: str,
     ) -> int:
+        raise NotImplementedError
+
+    async def distill_response(
+        self,
+        original_response: str,
+        context: list[MessagePayload] | None = None,
+    ) -> str:
         raise NotImplementedError
 
 
@@ -467,3 +475,99 @@ class AsyncContextManager:
 
     async def __aexit__(self, *args: object) -> None:
         pass
+
+
+class MockEventWithDistillation:
+    """Mock Telegram event that can simulate MessageTooLongError."""
+
+    def __init__(self, fail_first_reply: bool = False) -> None:
+        self.replied_messages: list[str] = []
+        self.sender_id: int = 123
+        self.chat_id: int = 456
+        self.reply_to_msg_id: int | None = None
+        self.raw_text: str = ""
+        self._fail_first_reply = fail_first_reply
+        self._reply_count = 0
+
+    async def reply(self, message: str) -> None:
+        self._reply_count += 1
+        if self._fail_first_reply and self._reply_count == 1:
+            raise MessageTooLongError(request=None)
+        self.replied_messages.append(message)
+
+    async def get_chat(self) -> SimpleNamespace:
+        return SimpleNamespace(title="TestGroup", username=None)
+
+    async def get_sender(self) -> SimpleNamespace:
+        return SimpleNamespace(first_name="Test", last_name="User", username="testuser")
+
+
+class TestDistillationProtocol:
+    """Tests for the message distillation protocol when responses are too long."""
+
+    def test_distillation_triggered_on_message_too_long(
+        self, telegram_service: TelegramService
+    ) -> None:
+        """Test that distillation is triggered when MessageTooLongError occurs."""
+        long_response = "A" * 5000  # Response that exceeds Telegram limit
+        distilled_response = "Distilled version of the response"
+
+        # Setup mocks
+        cast(Any, telegram_service.neibot).get_response = AsyncMock(
+            return_value=long_response
+        )
+        cast(Any, telegram_service.neibot).distill_response = AsyncMock(
+            return_value=distilled_response
+        )
+
+        event = MockEventWithDistillation(fail_first_reply=True)
+        event.raw_text = "/cmd test message"
+
+        telegram_service.bot = SimpleNamespace(
+            action=lambda chat_id, action: AsyncContextManager(),
+            get_messages=AsyncMock(return_value=None),
+            get_me=AsyncMock(return_value=SimpleNamespace(id=999)),
+        )
+        telegram_service.me = SimpleNamespace(id=999)
+
+        asyncio.run(telegram_service._my_event_handler(event))
+
+        # Verify distill_response was called with the original long response and context
+        cast(Any, telegram_service.neibot).distill_response.assert_called_once()
+        call_args = cast(Any, telegram_service.neibot).distill_response.call_args
+        assert call_args[0][0] == long_response  # First positional arg is the response
+        assert call_args[1]["context"] is not None  # Context was passed
+
+        # Verify the distilled response was sent
+        assert len(event.replied_messages) == 1
+        assert event.replied_messages[0] == distilled_response
+
+    def test_no_distillation_when_response_fits(
+        self, telegram_service: TelegramService
+    ) -> None:
+        """Test that distillation is NOT triggered when response fits in limit."""
+        normal_response = "A short response"
+
+        cast(Any, telegram_service.neibot).get_response = AsyncMock(
+            return_value=normal_response
+        )
+        cast(Any, telegram_service.neibot).distill_response = AsyncMock()
+
+        event = MockEventWithDistillation(fail_first_reply=False)
+        event.raw_text = "/cmd test message"
+
+        telegram_service.bot = SimpleNamespace(
+            action=lambda chat_id, action: AsyncContextManager(),
+            get_messages=AsyncMock(return_value=None),
+            get_me=AsyncMock(return_value=SimpleNamespace(id=999)),
+        )
+        telegram_service.me = SimpleNamespace(id=999)
+
+        asyncio.run(telegram_service._my_event_handler(event))
+
+        # Verify distill_response was NOT called
+        cast(Any, telegram_service.neibot).distill_response.assert_not_called()
+
+        # Verify the normal response was sent
+        assert len(event.replied_messages) == 1
+        assert event.replied_messages[0] == normal_response

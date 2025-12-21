@@ -7,6 +7,7 @@ from io import BytesIO
 from typing import Any, Literal, cast
 
 from telethon import TelegramClient, events
+from telethon.errors import MessageTooLongError
 
 from app.entities.message import ImageAttachment, MessagePayload
 from app.services.NeibotService.neibot_service_interface import NeibotServiceInterface
@@ -216,7 +217,20 @@ class TelegramService(TelegramServiceInterface):
                 context, model_name=model_name, user_id=str(event.sender_id)
             )
 
-        await event.reply(response)
+        try:
+            await event.reply(response)
+        except MessageTooLongError:
+            self.logger.warning(
+                "Response too long (%d chars), activating distillation protocol",
+                len(response),
+            )
+            # Activate the distillation protocol to condense the response
+            # Pass last 10 messages (5 exchanges) for context
+            async with self.bot.action(event.chat_id, "typing"):
+                distilled_response = await self.neibot.distill_response(
+                    response, context=context[-10:]
+                )
+            await event.reply(distilled_response)
 
     async def __build_metadata(self, event) -> str:
         chat = await event.get_chat()

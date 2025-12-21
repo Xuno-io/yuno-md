@@ -411,3 +411,133 @@ class TestMemoryToolExecution:
 
         assert "failed" in result.lower()
         mock_error.assert_called()
+
+
+class TestDistillResponse:
+    """Test cases for the distill_response method."""
+
+    @pytest.mark.asyncio
+    async def test_distill_response_success(
+        self, neibot_service: NeibotService
+    ) -> None:
+        """Test successful response distillation."""
+        original_response = "A" * 5000  # Long response
+        distilled = "1. EL ESTRATO: Core idea\n2. EL AGRIETAMIENTO: Exception\n3. LA LÍNEA DE FUGA: Mutation\n4. EL VECTOR: Action"
+
+        mock_response = MagicMock()
+        mock_response.text = distilled
+        neibot_service.client.aio.models.generate_content.return_value = mock_response
+
+        result = await neibot_service.distill_response(original_response)
+
+        assert result == distilled
+        # Verify the LLM was called
+        neibot_service.client.aio.models.generate_content.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_distill_response_with_context(
+        self, neibot_service: NeibotService
+    ) -> None:
+        """Test distillation includes conversation context when provided."""
+        original_response = "A" * 5000
+        distilled = "Distilled with context"
+        context: list[MessagePayload] = [
+            {"role": "user", "content": "What is Python?", "attachments": []},
+            {"role": "assistant", "content": "Python is a language", "attachments": []},
+            {"role": "user", "content": "Tell me more", "attachments": []},
+        ]
+
+        mock_response = MagicMock()
+        mock_response.text = distilled
+        neibot_service.client.aio.models.generate_content.return_value = mock_response
+
+        result = await neibot_service.distill_response(
+            original_response, context=context
+        )
+
+        assert result == distilled
+        # Verify the LLM was called with context in the prompt
+        call_args = neibot_service.client.aio.models.generate_content.call_args
+        contents = call_args[1]["contents"]
+        prompt_text = contents[0].parts[0].text
+        assert "CONTEXTO DE LA CONVERSACIÓN" in prompt_text
+        assert "What is Python?" in prompt_text
+
+    @pytest.mark.asyncio
+    async def test_distill_response_empty_result(
+        self, neibot_service: NeibotService, logger: logging.Logger
+    ) -> None:
+        """Test handling when distillation returns empty response."""
+        original_response = "A" * 5000
+
+        mock_response = MagicMock()
+        mock_response.text = ""
+        neibot_service.client.aio.models.generate_content.return_value = mock_response
+
+        with patch.object(logger, "warning") as mock_warning:
+            result = await neibot_service.distill_response(original_response)
+
+        assert "Error" in result or "No pude" in result
+        mock_warning.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_distill_response_handles_exception(
+        self, neibot_service: NeibotService, logger: logging.Logger
+    ) -> None:
+        """Test handling of exceptions during distillation."""
+        original_response = "A" * 5000
+
+        neibot_service.client.aio.models.generate_content.side_effect = Exception(
+            "API Error"
+        )
+
+        with patch.object(logger, "error") as mock_error:
+            result = await neibot_service.distill_response(original_response)
+
+        assert "Error" in result
+        mock_error.assert_called()
+
+    def test_load_distill_prompt_file_not_found(
+        self, neibot_service: NeibotService, logger: logging.Logger
+    ) -> None:
+        """Test fallback to default prompt when file not found."""
+        with patch("pathlib.Path.read_text", side_effect=FileNotFoundError()):
+            with patch.object(logger, "warning") as mock_warning:
+                prompt = neibot_service._load_distill_prompt()
+
+        assert "EL ESTRATO" in prompt or "CUATRO movimientos" in prompt
+        mock_warning.assert_called()
+
+    def test_distill_model_name_configurable(self, logger: logging.Logger) -> None:
+        """Test that distill_model_name is configurable."""
+        custom_model = "custom-distill-model"
+
+        with patch("app.services.NeibotService.neibot_service.genai.Client"):
+            service = NeibotService(
+                system_prompt="Test",
+                model_name="gemini-pro",
+                location="us-central1",
+                project_id="test-project",
+                temperature=0.7,
+                max_tokens=1000,
+                logger=logger,
+                distill_model_name=custom_model,
+            )
+
+        assert service.distill_model_name == custom_model
+
+    def test_distill_model_name_default(self, logger: logging.Logger) -> None:
+        """Test that distill_model_name defaults to gemini-2.0-flash."""
+        with patch("app.services.NeibotService.neibot_service.genai.Client"):
+            service = NeibotService(
+                system_prompt="Test",
+                model_name="gemini-pro",
+                location="us-central1",
+                project_id="test-project",
+                temperature=0.7,
+                max_tokens=1000,
+                logger=logger,
+                # No distill_model_name provided
+            )
+
+        assert service.distill_model_name == "gemini-2.0-flash"
