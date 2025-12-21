@@ -527,7 +527,7 @@ class TestDistillResponse:
         assert service.distill_model_name == custom_model
 
     def test_distill_model_name_default(self, logger: logging.Logger) -> None:
-        """Test that distill_model_name defaults to gemini-2.0-flash."""
+        """Test that distill_model_name defaults to gemini-2.5-pro."""
         with patch("app.services.NeibotService.neibot_service.genai.Client"):
             service = NeibotService(
                 system_prompt="Test",
@@ -540,4 +540,4 @@ class TestDistillResponse:
                 # No distill_model_name provided
             )
 
-        assert service.distill_model_name == "gemini-2.0-flash"
+        assert service.distill_model_name == "gemini-2.5-pro"

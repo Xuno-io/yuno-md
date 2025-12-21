@@ -361,7 +361,7 @@ class TelegramService(TelegramServiceInterface):
             return True
         elif message_text.startswith("/save") or message_text.startswith("/memory"):
             return True
-        elif "@yunodotbot" in message_text:
+        elif "@yunoaidotcom" in message_text:
             return True
 
         if event.reply_to_msg_id:

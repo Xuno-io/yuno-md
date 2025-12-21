@@ -96,7 +96,7 @@ class NeibotService(NeibotServiceInterface):
             cache_threshold: Token threshold (unused in this version, kept for interface)
             memory_service: mem0-based memory service for long-term memory
             extraction_model_name: Model for fact extraction (defaults to gemini-2.0-flash)
-            distill_model_name: Model for response distillation when messages are too long
+            distill_model_name: Model for response distillation when messages are too long (defaults to gemini-2.5-pro)
         """
         self.system_prompt = system_prompt
         self.model_name = model_name
@@ -109,8 +109,8 @@ class NeibotService(NeibotServiceInterface):
         self.memory_service = memory_service
         # Use a fast, cheap model for extraction tasks (structured output, no deep reasoning)
         self.extraction_model_name = extraction_model_name or "gemini-2.0-flash"
-        # Model for distilling long responses (defaults to gemini-2.0-flash)
-        self.distill_model_name = distill_model_name or "gemini-2.0-flash"
+        # Model for distilling long responses (defaults to gemini-2.5-pro)
+        self.distill_model_name = distill_model_name or "gemini-2.5-pro"
 
         # Load the distillation prompt from file
         self.distill_prompt = self._load_distill_prompt()
@@ -441,7 +441,7 @@ class NeibotService(NeibotServiceInterface):
         Returns:
             The distillation prompt content, or a default if file is not found.
         """
-        prompt_path = Path("fragment_intensively_v2.prompt")
+        prompt_path = Path(__file__).resolve().parent / "fragment_intensively_v2.prompt"
         try:
             return prompt_path.read_text(encoding="utf-8")
         except FileNotFoundError:
@@ -507,7 +507,15 @@ class NeibotService(NeibotServiceInterface):
             # Use lower temperature for more focused output
             config = types.GenerateContentConfig(
                 temperature=0.7,
-                max_output_tokens=4000,  # Ensure output fits in Telegram limit
+                # Telegram limits are in characters (4096), not tokens.
+                # Tokens differ from characters (typically 1 token ≈ 3-4 characters).
+                # This conservative token cap (900) is chosen to keep output safely
+                # under Telegram's 4096-character limit.
+                max_output_tokens=900,
+                # Allow the model to reason internally with up to 1024 tokens
+                # for better distillation quality, while keeping final output ≤ 900 tokens.
+                # thinking_budget and max_output_tokens are independent parameters.
+                thinking_config=types.ThinkingConfig(thinking_budget=1024),
             )
 
             # Build content for the distillation request
