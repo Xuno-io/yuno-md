@@ -19,6 +19,9 @@ from app.repositories.chat_repository.chat_repository_interface import (
     ChatRepositoryInterface,
 )
 
+# Telegram message character limit
+TELEGRAM_MESSAGE_LIMIT = 4096
+
 
 class ImageProcessingError(Exception):
     """Base error for attachment processing failures."""
@@ -230,7 +233,38 @@ class TelegramService(TelegramServiceInterface):
                 distilled_response = await self.neibot.distill_response(
                     response, context=context[-10:]
                 )
-            await event.reply(distilled_response)
+
+            # Defensive handling: distilled_response might still exceed Telegram's limit
+            try:
+                await event.reply(distilled_response)
+            except MessageTooLongError:
+                self.logger.warning(
+                    "Distilled response still too long (%d chars), truncating to %d chars",
+                    len(distilled_response),
+                    TELEGRAM_MESSAGE_LIMIT,
+                )
+                # Truncate preserving the end (most important information is usually at the end)
+                # Reserve space for truncation notice
+                truncation_notice = (
+                    "\n\n[... mensaje truncado por límite de caracteres]"
+                )
+                max_content_length = TELEGRAM_MESSAGE_LIMIT - len(truncation_notice)
+                truncated_response = (
+                    distilled_response[-max_content_length:] + truncation_notice
+                )
+                await event.reply(truncated_response)
+            except Exception as e:
+                self.logger.error(
+                    "Failed to send distilled response (%d chars): %s",
+                    len(distilled_response),
+                    str(e),
+                    exc_info=True,
+                )
+                # Send a fallback message to inform the user
+                await event.reply(
+                    "Lo siento, hubo un error al enviar la respuesta destilada. "
+                    "Por favor, intenta reformular tu pregunta de manera más específica."
+                )
 
     async def __build_metadata(self, event) -> str:
         chat = await event.get_chat()

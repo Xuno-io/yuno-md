@@ -480,18 +480,23 @@ class AsyncContextManager:
 class MockEventWithDistillation:
     """Mock Telegram event that can simulate MessageTooLongError."""
 
-    def __init__(self, fail_first_reply: bool = False) -> None:
+    def __init__(
+        self, fail_first_reply: bool = False, fail_second_reply: bool = False
+    ) -> None:
         self.replied_messages: list[str] = []
         self.sender_id: int = 123
         self.chat_id: int = 456
         self.reply_to_msg_id: int | None = None
         self.raw_text: str = ""
         self._fail_first_reply = fail_first_reply
+        self._fail_second_reply = fail_second_reply
         self._reply_count = 0
 
     async def reply(self, message: str) -> None:
         self._reply_count += 1
         if self._fail_first_reply and self._reply_count == 1:
+            raise MessageTooLongError(request=None)
+        if self._fail_second_reply and self._reply_count == 2:
             raise MessageTooLongError(request=None)
         self.replied_messages.append(message)
 
@@ -571,3 +576,42 @@ class TestDistillationProtocol:
         # Verify the normal response was sent
         assert len(event.replied_messages) == 1
         assert event.replied_messages[0] == normal_response
+
+    def test_distilled_response_too_long_truncates(
+        self, telegram_service: TelegramService
+    ) -> None:
+        """Test that when distilled response is also too long, it gets truncated."""
+        long_response = "A" * 5000  # Response that exceeds Telegram limit
+        # Create a distilled response that also exceeds the limit
+        long_distilled_response = "B" * 5000
+
+        # Setup mocks
+        cast(Any, telegram_service.neibot).get_response = AsyncMock(
+            return_value=long_response
+        )
+        cast(Any, telegram_service.neibot).distill_response = AsyncMock(
+            return_value=long_distilled_response
+        )
+
+        # Mock event that fails both first and second reply
+        event = MockEventWithDistillation(fail_first_reply=True, fail_second_reply=True)
+        event.raw_text = "/cmd test message"
+
+        telegram_service.bot = SimpleNamespace(
+            action=lambda chat_id, action: AsyncContextManager(),
+            get_messages=AsyncMock(return_value=None),
+            get_me=AsyncMock(return_value=SimpleNamespace(id=999)),
+        )
+        telegram_service.me = SimpleNamespace(id=999)
+
+        asyncio.run(telegram_service._my_event_handler(event))
+
+        # Verify distill_response was called
+        cast(Any, telegram_service.neibot).distill_response.assert_called_once()
+
+        # Verify the truncated response was sent (should have truncation notice)
+        assert len(event.replied_messages) == 1
+        final_message = event.replied_messages[0]
+        assert "[... mensaje truncado por límite de caracteres]" in final_message
+        # Verify it's within Telegram's limit (4096 chars)
+        assert len(final_message) <= 4096
