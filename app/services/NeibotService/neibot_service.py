@@ -93,7 +93,7 @@ class NeibotService(NeibotServiceInterface):
             logger: Logger instance
             cache_threshold: Token threshold (unused in this version, kept for interface)
             memory_service: mem0-based memory service for long-term memory
-            extraction_model_name: Model for fact extraction (defaults to gemini-2.0-flash)
+            extraction_model_name: Model for fact extraction (defaults to gemini-3-flash-preview)
             distill_model_name: Model for response distillation when messages are too long
         """
         self.system_prompt = system_prompt
@@ -105,7 +105,7 @@ class NeibotService(NeibotServiceInterface):
         self.logger = logger
         self.cache_threshold = cache_threshold
         self.memory_service = memory_service
-        self.extraction_model_name = extraction_model_name or "gemini-2.0-flash"
+        self.extraction_model_name = extraction_model_name or "gemini-3-flash-preview"
         self.distill_model_name = distill_model_name or "gemini-2.5-pro"
 
         # Load the distillation prompt from file
