@@ -375,6 +375,17 @@ class NeibotService(NeibotServiceInterface):
 
             new_message = types.Content(role="user", parts=parts)
 
+            # Check for empty content to avoid API errors
+            if not new_message.parts:
+                self.logger.warning(
+                    "new_message parts empty (no valid content or attachments). Using safe default."
+                )
+                new_message.parts = [
+                    types.Part.from_text(
+                        text="[System note: User sent an empty message or unsupported attachment]"
+                    )
+                ]
+
             # Run the agent and collect the final response
             final_response = ""
 

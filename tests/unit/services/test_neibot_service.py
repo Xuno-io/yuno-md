@@ -413,6 +413,64 @@ class TestGetResponse:
         assert "couldn't process your request" in result
         mock_error.assert_called()
 
+    @pytest.mark.asyncio
+    async def test_get_response_handles_empty_user_message_content(
+        self, neibot_service: NeibotService, logger: logging.Logger
+    ) -> None:
+        """Test that empty user message content falls back to placeholder."""
+        mock_session = MagicMock()
+        mock_session.id = "test-session-id"
+        cast(
+            Mock, neibot_service.session_service.create_session
+        ).return_value = mock_session
+
+        # Mock event (response)
+        mock_event = MagicMock()
+        mock_event.is_final_response.return_value = True
+        mock_content = MagicMock()
+        mock_part = MagicMock()
+        mock_part.text = "I see nothing."
+        mock_content.parts = [mock_part]
+        mock_event.content = mock_content
+
+        with patch("app.services.NeibotService.neibot_service.Agent"):
+            with patch(
+                "app.services.NeibotService.neibot_service.Runner"
+            ) as MockRunner:
+                mock_runner = MockRunner.return_value
+
+                async def mock_run_async(*args, **kwargs):
+                    # Capture the new_message passed to runner
+                    new_message = kwargs.get("new_message")
+                    assert new_message is not None
+                    # Verify the fix: empty content replaced by placeholder
+                    assert len(new_message.parts) == 1
+                    # Access text attribute directly as it's a real Part object
+                    assert "[System note:" in new_message.parts[0].text
+                    yield mock_event
+
+                mock_runner.run_async = mock_run_async
+
+                # History with empty content ("") and empty attachments
+                history: list[MessagePayload] = [
+                    {"role": "user", "content": "", "attachments": []}
+                ]
+
+                # We need to ensure we catch the warning
+                with patch.object(logger, "warning") as mock_warning:
+                    await neibot_service.get_response(history)
+
+                    found = False
+                    # Check arguments of all warning calls
+                    for call in mock_warning.call_args_list:
+                        args, _ = call
+                        if args and "new_message parts empty" in args[0]:
+                            found = True
+                            break
+                    assert (
+                        found
+                    ), "Expected warning about empty message parts not found."
+
 
 class TestCreateSessionWithHistory:
     """Test cases for session creation with history."""
