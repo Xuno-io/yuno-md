@@ -471,6 +471,41 @@ class TestGetResponse:
                         found
                     ), "Expected warning about empty message parts not found."
 
+    @pytest.mark.asyncio
+    async def test_get_response_handles_timeout(
+        self, neibot_service: NeibotService, logger: logging.Logger
+    ) -> None:
+        """Test that runner timeout is handled gracefully."""
+        mock_session = MagicMock()
+        mock_session.id = "test-session-id"
+        cast(
+            Mock, neibot_service.session_service.create_session
+        ).return_value = mock_session
+
+        with patch("app.services.NeibotService.neibot_service.Agent"):
+            with patch(
+                "app.services.NeibotService.neibot_service.Runner"
+            ) as MockRunner:
+                mock_runner = MockRunner.return_value
+
+                async def mock_run_async(*args, **kwargs):
+                    # Simulate timeout immediately
+                    if False:
+                        yield  # This makes it an async generator
+                    raise TimeoutError()
+
+                mock_runner.run_async = mock_run_async
+
+                history: list[MessagePayload] = [
+                    {"role": "user", "content": "Hello", "attachments": []}
+                ]
+
+                with patch.object(logger, "error") as mock_error:
+                    result = await neibot_service.get_response(history)
+
+                assert "taking longer than expected" in result
+                mock_error.assert_called_with("ADK runner execution timed out")
+
 
 class TestCreateSessionWithHistory:
     """Test cases for session creation with history."""

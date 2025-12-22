@@ -8,6 +8,7 @@ replacing the manual tool-calling loop with ADK's automatic orchestration.
 from __future__ import annotations
 
 import logging
+import asyncio
 import base64
 import uuid
 import contextvars
@@ -389,17 +390,24 @@ class NeibotService(NeibotServiceInterface):
             # Run the agent and collect the final response
             final_response = ""
 
-            async for event in runner.run_async(
-                user_id=effective_user_id,
-                session_id=session.id,
-                new_message=new_message,
-            ):
-                # Check for final response
-                if event.is_final_response():
-                    if event.content and event.content.parts:
-                        for part in event.content.parts:
-                            if hasattr(part, "text") and part.text:
-                                final_response += part.text
+            try:
+                # Set a timeout to prevent indefinite hanging (e.g. tool loop issues)
+                async with asyncio.timeout(300):
+                    async for event in runner.run_async(
+                        user_id=effective_user_id,
+                        session_id=session.id,
+                        new_message=new_message,
+                    ):
+                        # Check for final response
+                        if event.is_final_response():
+                            if event.content and event.content.parts:
+                                for part in event.content.parts:
+                                    if hasattr(part, "text") and part.text:
+                                        final_response += part.text
+
+            except TimeoutError:
+                self.logger.error("ADK runner execution timed out")
+                return "I apologize, but this request is taking longer than expected. Please try again."
 
             if not final_response:
                 self.logger.warning("ADK returned empty response")
