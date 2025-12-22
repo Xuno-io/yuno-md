@@ -107,7 +107,7 @@ def get_memory_service(components: Components) -> MemoryServiceInterface:
 
     # Model for memory operations
     memory_llm_model = configuration.get_configuration(
-        "MEMORY_LLM_MODEL", str, default="gemini-2.0-flash"
+        "MEMORY_LLM_MODEL", str, default="gemini-3-flash-preview"
     )
     memory_embedder_model = configuration.get_configuration(
         "MEMORY_EMBEDDER_MODEL", str, default="text-embedding-004"

@@ -79,7 +79,7 @@ class MemoryService(MemoryServiceInterface):
         logger: logging.Logger,
         redis_host: str | None = None,
         redis_port: int | None = None,
-        llm_model: str = "gemini-2.0-flash",
+        llm_model: str = "gemini-3-flash-preview",
         embedder_model: str = "text-embedding-004",
     ) -> None:
         """
