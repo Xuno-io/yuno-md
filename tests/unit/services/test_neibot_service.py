@@ -6,12 +6,16 @@ memory capture, and response distillation.
 """
 
 import logging
-from unittest.mock import AsyncMock, patch, MagicMock
+from app.services.NeibotService.neibot_service import (
+    NeibotService,
+    _current_user_context,
+)
+from typing import cast
+from unittest.mock import AsyncMock, patch, MagicMock, Mock
 
 import pytest
 
 from app.entities.message import MessagePayload
-from app.services.NeibotService.neibot_service import NeibotService
 
 
 @pytest.fixture
@@ -166,17 +170,21 @@ class TestSearchMemoryTool:
             {"memory": "[TECH_STACK] Uses Python"},
             {"memory": "[TECH_STACK] Uses Redis"},
         ]
+
         neibot_service.memory_service = mock_memory
-        neibot_service._current_user_id = "user_123"
 
-        # Get the tool function
-        search_memory = neibot_service._create_search_memory_tool()
+        token = _current_user_context.set("user_123")
+        try:
+            # Get the tool function
+            search_memory = neibot_service._create_search_memory_tool()
 
-        result = await search_memory(query="tech stack", category="TECH_STACK")
+            result = await search_memory(query="tech stack", category="TECH_STACK")
 
-        assert result["status"] == "success"
-        assert "Uses Python" in result["result"]
-        assert "Uses Redis" in result["result"]
+            assert result["status"] == "success"
+            assert "Uses Python" in result["result"]
+            assert "Uses Redis" in result["result"]
+        finally:
+            _current_user_context.reset(token)
 
     @pytest.mark.asyncio
     async def test_search_memory_no_results(
@@ -185,14 +193,18 @@ class TestSearchMemoryTool:
         """Test memory search with no results."""
         mock_memory = MagicMock()
         mock_memory.search.return_value = []
+
         neibot_service.memory_service = mock_memory
-        neibot_service._current_user_id = "user_123"
 
-        search_memory = neibot_service._create_search_memory_tool()
-        result = await search_memory(query="unknown topic", category="TECH_STACK")
+        token = _current_user_context.set("user_123")
+        try:
+            search_memory = neibot_service._create_search_memory_tool()
+            result = await search_memory(query="unknown topic", category="TECH_STACK")
 
-        assert result["status"] == "success"
-        assert "No relevant memories found" in result["result"]
+            assert result["status"] == "success"
+            assert "No relevant memories found" in result["result"]
+        finally:
+            _current_user_context.reset(token)
 
     @pytest.mark.asyncio
     async def test_search_memory_no_memory_service(
@@ -200,13 +212,16 @@ class TestSearchMemoryTool:
     ) -> None:
         """Test memory search when no memory service available."""
         neibot_service.memory_service = None
-        neibot_service._current_user_id = "user_123"
 
-        search_memory = neibot_service._create_search_memory_tool()
-        result = await search_memory(query="test", category="TECH_STACK")
+        token = _current_user_context.set("user_123")
+        try:
+            search_memory = neibot_service._create_search_memory_tool()
+            result = await search_memory(query="test", category="TECH_STACK")
 
-        assert result["status"] == "error"
-        assert "not available" in result["result"]
+            assert result["status"] == "error"
+            assert "not available" in result["result"]
+        finally:
+            _current_user_context.reset(token)
 
     @pytest.mark.asyncio
     async def test_search_memory_no_user_id(
@@ -215,13 +230,17 @@ class TestSearchMemoryTool:
         """Test memory search when no user context available."""
         mock_memory = MagicMock()
         neibot_service.memory_service = mock_memory
-        neibot_service._current_user_id = None
 
-        search_memory = neibot_service._create_search_memory_tool()
-        result = await search_memory(query="test", category="TECH_STACK")
+        # Ensure context is empty
+        token = _current_user_context.set(None)
+        try:
+            search_memory = neibot_service._create_search_memory_tool()
+            result = await search_memory(query="test", category="TECH_STACK")
 
-        assert result["status"] == "error"
-        assert "No user context" in result["result"]
+            assert result["status"] == "error"
+            assert "No user context" in result["result"]
+        finally:
+            _current_user_context.reset(token)
 
     @pytest.mark.asyncio
     async def test_search_memory_handles_exception(
@@ -230,16 +249,20 @@ class TestSearchMemoryTool:
         """Test memory search handles exceptions."""
         mock_memory = MagicMock()
         mock_memory.search.side_effect = Exception("Search failed")
+
         neibot_service.memory_service = mock_memory
-        neibot_service._current_user_id = "user_123"
 
-        with patch.object(logger, "error") as mock_error:
-            search_memory = neibot_service._create_search_memory_tool()
-            result = await search_memory(query="test", category="TECH_STACK")
+        token = _current_user_context.set("user_123")
+        try:
+            with patch.object(logger, "error") as mock_error:
+                search_memory = neibot_service._create_search_memory_tool()
+                result = await search_memory(query="test", category="TECH_STACK")
 
-        assert result["status"] == "error"
-        assert "failed" in result["result"].lower()
-        mock_error.assert_called()
+            assert result["status"] == "error"
+            assert "failed" in result["result"].lower()
+            mock_error.assert_called()
+        finally:
+            _current_user_context.reset(token)
 
 
 class TestGetResponse:
@@ -262,7 +285,9 @@ class TestGetResponse:
         # Create mock session
         mock_session = MagicMock()
         mock_session.id = "test-session-id"
-        neibot_service.session_service.create_session.return_value = mock_session
+        cast(
+            Mock, neibot_service.session_service.create_session
+        ).return_value = mock_session
 
         # Create mock event with final response
         mock_event = MagicMock()
@@ -301,7 +326,9 @@ class TestGetResponse:
         """Test get_response uses custom model when provided."""
         mock_session = MagicMock()
         mock_session.id = "test-session-id"
-        neibot_service.session_service.create_session.return_value = mock_session
+        cast(
+            Mock, neibot_service.session_service.create_session
+        ).return_value = mock_session
 
         # Create mock event with empty response
         mock_event = MagicMock()
@@ -337,7 +364,9 @@ class TestGetResponse:
         """Test that user_id is set for tool access during get_response."""
         mock_session = MagicMock()
         mock_session.id = "test-session-id"
-        neibot_service.session_service.create_session.return_value = mock_session
+        cast(
+            Mock, neibot_service.session_service.create_session
+        ).return_value = mock_session
 
         mock_event = MagicMock()
         mock_event.is_final_response.return_value = True
@@ -351,7 +380,7 @@ class TestGetResponse:
 
                 async def mock_run_async(*args, **kwargs):
                     # Check that user_id was set during execution
-                    assert neibot_service._current_user_id == "user_123"
+                    assert _current_user_context.get() == "user_123"
                     yield mock_event
 
                 mock_runner.run_async = mock_run_async
@@ -362,17 +391,17 @@ class TestGetResponse:
 
                 await neibot_service.get_response(history, user_id="user_123")
 
-        # User ID should be cleared after execution
-        assert neibot_service._current_user_id is None
+        # User ID should be cleared after execution (back to None)
+        assert _current_user_context.get() is None
 
     @pytest.mark.asyncio
     async def test_get_response_handles_exception(
         self, neibot_service: NeibotService, logger: logging.Logger
     ) -> None:
         """Test handling of exceptions during agent execution."""
-        neibot_service.session_service.create_session.side_effect = Exception(
-            "Session error"
-        )
+        cast(
+            Mock, neibot_service.session_service.create_session
+        ).side_effect = Exception("Session error")
 
         with patch.object(logger, "error") as mock_error:
             history: list[MessagePayload] = [
@@ -395,15 +424,19 @@ class TestCreateSessionWithHistory:
         """Test that session is created with correct user_id."""
         mock_session = MagicMock()
         mock_session.id = "test-session"
-        neibot_service.session_service.create_session.return_value = mock_session
+        cast(
+            Mock, neibot_service.session_service.create_session
+        ).return_value = mock_session
 
         await neibot_service._create_session_with_history(
             user_id="test_user",
             history=[],
         )
 
-        neibot_service.session_service.create_session.assert_called_once()
-        call_kwargs = neibot_service.session_service.create_session.call_args[1]
+        cast(Mock, neibot_service.session_service.create_session).assert_called_once()
+        call_kwargs = cast(
+            Mock, neibot_service.session_service.create_session
+        ).call_args[1]
         assert call_kwargs["user_id"] == "test_user"
         assert call_kwargs["app_name"] == "yunoai"
 
@@ -412,7 +445,9 @@ class TestCreateSessionWithHistory:
         """Test that history messages are appended as events."""
         mock_session = MagicMock()
         mock_session.id = "test-session"
-        neibot_service.session_service.create_session.return_value = mock_session
+        cast(
+            Mock, neibot_service.session_service.create_session
+        ).return_value = mock_session
 
         history: list[MessagePayload] = [
             {"role": "user", "content": "First message", "attachments": []},
@@ -426,14 +461,16 @@ class TestCreateSessionWithHistory:
         )
 
         # Should append 2 events (history minus the last message)
-        assert neibot_service.session_service.append_event.call_count == 2
+        assert cast(Mock, neibot_service.session_service.append_event).call_count == 2
 
     @pytest.mark.asyncio
     async def test_skips_system_messages(self, neibot_service: NeibotService) -> None:
         """Test that system messages are skipped when building history."""
         mock_session = MagicMock()
         mock_session.id = "test-session"
-        neibot_service.session_service.create_session.return_value = mock_session
+        cast(
+            Mock, neibot_service.session_service.create_session
+        ).return_value = mock_session
 
         history: list[MessagePayload] = [
             {"role": "system", "content": "System prompt", "attachments": []},
@@ -447,7 +484,7 @@ class TestCreateSessionWithHistory:
         )
 
         # Should only append 1 event (skipping system and last message)
-        assert neibot_service.session_service.append_event.call_count == 1
+        assert cast(Mock, neibot_service.session_service.append_event).call_count == 1
 
 
 class TestCaptureFactsFromHistory:
@@ -541,12 +578,16 @@ class TestDistillResponse:
 
         mock_response = MagicMock()
         mock_response.text = distilled
-        neibot_service.client.aio.models.generate_content.return_value = mock_response
+        cast(
+            Mock, neibot_service.client.aio.models.generate_content
+        ).return_value = mock_response
 
         result = await neibot_service.distill_response(original_response)
 
         assert result == distilled
-        neibot_service.client.aio.models.generate_content.assert_called_once()
+        cast(
+            Mock, neibot_service.client.aio.models.generate_content
+        ).assert_called_once()
 
     @pytest.mark.asyncio
     async def test_distill_response_with_context(
@@ -563,14 +604,18 @@ class TestDistillResponse:
 
         mock_response = MagicMock()
         mock_response.text = distilled
-        neibot_service.client.aio.models.generate_content.return_value = mock_response
+        cast(
+            Mock, neibot_service.client.aio.models.generate_content
+        ).return_value = mock_response
 
         result = await neibot_service.distill_response(
             original_response, context=context
         )
 
         assert result == distilled
-        call_args = neibot_service.client.aio.models.generate_content.call_args
+        call_args = cast(
+            Mock, neibot_service.client.aio.models.generate_content
+        ).call_args
         contents = call_args[1]["contents"]
         prompt_text = contents[0].parts[0].text
         assert "CONTEXTO DE LA CONVERSACIÓN" in prompt_text
@@ -585,7 +630,9 @@ class TestDistillResponse:
 
         mock_response = MagicMock()
         mock_response.text = ""
-        neibot_service.client.aio.models.generate_content.return_value = mock_response
+        cast(
+            Mock, neibot_service.client.aio.models.generate_content
+        ).return_value = mock_response
 
         with patch.object(logger, "warning") as mock_warning:
             result = await neibot_service.distill_response(original_response)
@@ -600,9 +647,9 @@ class TestDistillResponse:
         """Test handling of exceptions during distillation."""
         original_response = "A" * 5000
 
-        neibot_service.client.aio.models.generate_content.side_effect = Exception(
-            "API Error"
-        )
+        cast(
+            Mock, neibot_service.client.aio.models.generate_content
+        ).side_effect = Exception("API Error")
 
         with patch.object(logger, "error") as mock_error:
             result = await neibot_service.distill_response(original_response)

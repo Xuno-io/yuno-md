@@ -10,9 +10,10 @@ from __future__ import annotations
 import logging
 import base64
 import uuid
+import contextvars
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from collections.abc import Callable
 
 from google import genai
@@ -30,6 +31,12 @@ from app.tools.web_search_tool import web_search
 
 if TYPE_CHECKING:
     pass
+
+
+# Context variable for thread-safe user context access
+_current_user_context: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "current_user_id", default=None
+)
 
 
 # Default distillation prompt in case the file is not found
@@ -111,10 +118,6 @@ class NeibotService(NeibotServiceInterface):
         # Initialize ADK session service (in-memory for stateless per-request usage)
         self.session_service = InMemorySessionService()
 
-        # Store context for tools that need access to instance state
-        # This is used by the search_memory tool closure
-        self._current_user_id: str | None = None
-
         self.logger.info(
             "NeibotService initialized with Google ADK. Model: %s, Location: %s",
             self.model_name,
@@ -145,7 +148,7 @@ class NeibotService(NeibotServiceInterface):
             Returns:
                 Dictionary with search results or error message
             """
-            user_id = self._current_user_id
+            user_id = _current_user_context.get()
 
             if not self.memory_service:
                 return {"status": "error", "result": "Memory service not available."}
@@ -208,7 +211,7 @@ class NeibotService(NeibotServiceInterface):
             Configured ADK Agent
         """
         # Build tools list
-        tools = [web_search]
+        tools: list[Callable[..., Any] | Any] = [web_search]
 
         # Add memory search if memory service is available
         if self.memory_service:
@@ -319,13 +322,14 @@ class NeibotService(NeibotServiceInterface):
         Returns:
             The assistant's response
         """
+        token = None
         try:
             if not history:
                 self.logger.warning("Empty history provided")
                 return ""
 
-            # Store user_id for tool access
-            self._current_user_id = user_id
+            # Store user_id for tool access using contextvars
+            token = _current_user_context.set(user_id)
 
             # Use override model if provided
             current_model = model_name or self.model_name
@@ -386,9 +390,6 @@ class NeibotService(NeibotServiceInterface):
                             if hasattr(part, "text") and part.text:
                                 final_response += part.text
 
-            # Clean up user context
-            self._current_user_id = None
-
             if not final_response:
                 self.logger.warning("ADK returned empty response")
                 return ""
@@ -397,8 +398,10 @@ class NeibotService(NeibotServiceInterface):
 
         except Exception as e:
             self.logger.error("Error getting response from ADK: %s", e, exc_info=True)
-            self._current_user_id = None
             return "I'm sorry, I couldn't process your request at the moment."
+        finally:
+            if token:
+                _current_user_context.reset(token)
 
     @observe()
     async def capture_facts_from_history(
@@ -550,7 +553,7 @@ class NeibotService(NeibotServiceInterface):
             )
 
             # Build content for the distillation request
-            contents = [
+            contents: list[Any] = [
                 types.Content(
                     role="user",
                     parts=[types.Part.from_text(text=full_prompt)],
