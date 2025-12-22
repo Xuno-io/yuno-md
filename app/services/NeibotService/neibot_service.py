@@ -1,17 +1,35 @@
+"""
+NeibotService using Google Agent Development Kit (ADK).
+
+This service uses the ADK framework for conversational agent execution,
+replacing the manual tool-calling loop with ADK's automatic orchestration.
+"""
+
 from __future__ import annotations
 
 import logging
 import base64
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 from google import genai
 from google.genai import types
+from google.adk.agents import Agent
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService, Session
+from google.adk.events import Event
 from langfuse import observe
 
 from app.entities.message import MessagePayload
 from app.services.NeibotService.neibot_service_interface import NeibotServiceInterface
 from app.services.MemoryService.memory_service_interface import MemoryServiceInterface
+from app.tools.web_search_tool import web_search
+
+if TYPE_CHECKING:
+    pass
 
 
 # Default distillation prompt in case the file is not found
@@ -28,44 +46,16 @@ RESPUESTA ORIGINAL A DESTILAR:
 """
 
 
-# Tool definition for memory search
-SEARCH_MEMORY_TOOL = types.Tool(
-    function_declarations=[
-        types.FunctionDeclaration(
-            name="search_memory",
-            description=(
-                "Search long-term memory for project-specific facts about this user. "
-                "Use ONLY when the user asks about their specific project details, "
-                "past decisions, or constraints. DO NOT use for greetings or general knowledge."
-            ),
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "query": types.Schema(
-                        type=types.Type.STRING,
-                        description="The specific question or topic to search for",
-                    ),
-                    "category": types.Schema(
-                        type=types.Type.STRING,
-                        enum=["TECH_STACK", "BUSINESS_LOGIC", "USER_CONSTRAINTS"],
-                        description=(
-                            "The memory category to search in. "
-                            "TECH_STACK for code/infra, "
-                            "BUSINESS_LOGIC for rules/budgets, "
-                            "USER_CONSTRAINTS for limitations."
-                        ),
-                    ),
-                },
-                required=["query", "category"],
-            ),
-        )
-    ]
-)
+# Application name for ADK sessions
+ADK_APP_NAME = "yunoai"
 
 
 class NeibotService(NeibotServiceInterface):
     """
-    Service for Neibot using Google Gen AI SDK (v2) with Langfuse tracing.
+    Service for Neibot using Google Agent Development Kit (ADK) with Langfuse tracing.
+
+    ADK handles the tool-calling loop automatically, simplifying the code
+    and improving reliability.
     """
 
     def __init__(
@@ -83,7 +73,7 @@ class NeibotService(NeibotServiceInterface):
         distill_model_name: str | None = None,
     ) -> None:
         """
-        Initialize the service with Google Gen AI configuration.
+        Initialize the service with Google ADK configuration.
 
         Args:
             system_prompt: System instructions and personality
@@ -96,7 +86,7 @@ class NeibotService(NeibotServiceInterface):
             cache_threshold: Token threshold (unused in this version, kept for interface)
             memory_service: mem0-based memory service for long-term memory
             extraction_model_name: Model for fact extraction (defaults to gemini-2.0-flash)
-            distill_model_name: Model for response distillation when messages are too long (defaults to gemini-2.5-pro)
+            distill_model_name: Model for response distillation when messages are too long
         """
         self.system_prompt = system_prompt
         self.model_name = model_name
@@ -107,24 +97,206 @@ class NeibotService(NeibotServiceInterface):
         self.logger = logger
         self.cache_threshold = cache_threshold
         self.memory_service = memory_service
-        # Use a fast, cheap model for extraction tasks (structured output, no deep reasoning)
         self.extraction_model_name = extraction_model_name or "gemini-2.0-flash"
-        # Model for distilling long responses (defaults to gemini-2.5-pro)
         self.distill_model_name = distill_model_name or "gemini-2.5-pro"
 
         # Load the distillation prompt from file
         self.distill_prompt = self._load_distill_prompt()
 
-        # Initialize Google Gen AI Client (Vertex AI backend)
+        # Initialize Google Gen AI Client (Vertex AI backend) for distillation
         self.client = genai.Client(
             vertexai=True, project=self.project_id, location=self.location
         )
 
+        # Initialize ADK session service (in-memory for stateless per-request usage)
+        self.session_service = InMemorySessionService()
+
+        # Store context for tools that need access to instance state
+        # This is used by the search_memory tool closure
+        self._current_user_id: str | None = None
+
         self.logger.info(
-            "NeibotService initialized with Google Gen AI SDK. Model: %s, Location: %s",
+            "NeibotService initialized with Google ADK. Model: %s, Location: %s",
             self.model_name,
             self.location,
         )
+
+    def _create_search_memory_tool(self) -> Callable:
+        """
+        Create a search_memory tool function with access to the memory service.
+
+        Returns a closure that captures self for memory service access.
+        """
+
+        async def search_memory(query: str, category: str) -> dict:
+            """
+            Search long-term memory for project-specific facts about this user.
+
+            Use ONLY when the user asks about their specific project details,
+            past decisions, or constraints. DO NOT use for greetings or general knowledge.
+
+            Args:
+                query: The specific question or topic to search for
+                category: The memory category to search in.
+                    Options: TECH_STACK (for code/infra),
+                            BUSINESS_LOGIC (for rules/budgets),
+                            USER_CONSTRAINTS (for limitations)
+
+            Returns:
+                Dictionary with search results or error message
+            """
+            user_id = self._current_user_id
+
+            if not self.memory_service:
+                return {"status": "error", "result": "Memory service not available."}
+
+            if not user_id:
+                return {"status": "error", "result": "No user context available."}
+
+            self.logger.info(
+                "Searching memory for user %s: query='%s', category=%s",
+                user_id,
+                query,
+                category,
+            )
+
+            try:
+                memories = self.memory_service.search(
+                    query=query,
+                    user_id=user_id,
+                    category=category,
+                    limit=5,
+                )
+
+                if not memories:
+                    return {
+                        "status": "success",
+                        "result": "No relevant memories found for this query.",
+                    }
+
+                # Format memories for the LLM
+                from app.services.MemoryService.memory_service import (
+                    parse_embedded_category,
+                )
+
+                formatted = []
+                for mem in memories:
+                    text = mem.get("memory") or mem.get("text", "")
+                    cat, clean_text = parse_embedded_category(text)
+                    formatted.append(f"[{cat}] {clean_text}")
+
+                result = "\n".join(formatted)
+                self.logger.info(
+                    "Found %d memories for query '%s'", len(memories), query
+                )
+                return {"status": "success", "result": result}
+
+            except Exception as e:
+                self.logger.error("Memory search failed: %s", e)
+                return {"status": "error", "result": f"Memory search failed: {str(e)}"}
+
+        return search_memory
+
+    def _create_agent(self, model_name: str) -> Agent:
+        """
+        Create an ADK Agent with the configured tools.
+
+        Args:
+            model_name: The model to use for this agent instance
+
+        Returns:
+            Configured ADK Agent
+        """
+        # Build tools list
+        tools = [web_search]
+
+        # Add memory search if memory service is available
+        if self.memory_service:
+            tools.append(self._create_search_memory_tool())
+
+        # Add current UTC time to system prompt
+        utc_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        instruction_with_time = (
+            f"{self.system_prompt}\n\nCurrent time (UTC): {utc_time}"
+        )
+
+        return Agent(
+            model=model_name,
+            name="yuno_agent",
+            description="YunoAI - An intellectual catalyst for founders and creators",
+            instruction=instruction_with_time,
+            tools=tools,
+        )
+
+    async def _create_session_with_history(
+        self,
+        user_id: str,
+        history: list[MessagePayload],
+    ) -> Session:
+        """
+        Create an ADK session and pre-populate it with conversation history.
+
+        Args:
+            user_id: User identifier
+            history: List of previous messages (excluding the latest user message)
+
+        Returns:
+            Session with history loaded
+        """
+        session_id = str(uuid.uuid4())
+
+        # Create a new session
+        session = await self.session_service.create_session(
+            app_name=ADK_APP_NAME,
+            user_id=user_id,
+            session_id=session_id,
+        )
+
+        # Pre-populate history by appending events
+        # Skip the last message as it will be sent as the new_message
+        history_to_load = history[:-1] if history else []
+
+        for msg in history_to_load:
+            role = msg.get("role", "user")
+            content_text = msg.get("content", "")
+
+            # Skip system messages (handled in agent instruction)
+            if role == "system" or not content_text:
+                continue
+
+            # Map roles: user -> user, assistant -> agent
+            author = "user" if role == "user" else "agent"
+
+            # Create content with text
+            parts = [types.Part.from_text(text=content_text)]
+
+            # Handle attachments for user messages
+            if role == "user":
+                attachments = msg.get("attachments", [])
+                for attachment in attachments:
+                    base64_data = attachment.get("base64")
+                    mime_type = attachment.get("mime_type", "image/jpeg")
+                    if base64_data and isinstance(base64_data, str):
+                        try:
+                            image_bytes = base64.b64decode(base64_data)
+                            parts.append(
+                                types.Part.from_bytes(
+                                    data=image_bytes, mime_type=mime_type
+                                )
+                            )
+                        except Exception as e:
+                            self.logger.warning("Failed to decode attachment: %s", e)
+
+            content = types.Content(role=author, parts=parts)
+
+            # Create and append event
+            event = Event(
+                author=author,
+                content=content,
+            )
+            await self.session_service.append_event(session=session, event=event)
+
+        return session
 
     @observe()
     async def get_response(
@@ -134,10 +306,10 @@ class NeibotService(NeibotServiceInterface):
         user_id: str | None = None,
     ) -> str:
         """
-        Get a response using Google Gen AI SDK with tool execution support.
+        Get a response using Google ADK with automatic tool orchestration.
 
-        The LLM can use the search_memory tool to query long-term memory
-        when it needs context about the user's project or past decisions.
+        The ADK Agent automatically handles tool calls (search_memory, web_search)
+        and manages the conversation loop.
 
         Args:
             history: List of MessagePayload objects with role, content, and attachments
@@ -148,175 +320,85 @@ class NeibotService(NeibotServiceInterface):
             The assistant's response
         """
         try:
-            contents = self._build_contents(history)
+            if not history:
+                self.logger.warning("Empty history provided")
+                return ""
+
+            # Store user_id for tool access
+            self._current_user_id = user_id
 
             # Use override model if provided
             current_model = model_name or self.model_name
             if current_model != self.model_name:
-                self.logger.info(f"Using custom model {current_model}")
+                self.logger.info("Using custom model %s", current_model)
 
-            # Add current UTC time to system prompt
-            utc_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-            system_prompt_with_time = (
-                f"{self.system_prompt}\n\nCurrent time (UTC): {utc_time}"
+            # Create agent with current model
+            agent = self._create_agent(current_model)
+
+            # Create runner
+            runner = Runner(
+                agent=agent,
+                app_name=ADK_APP_NAME,
+                session_service=self.session_service,
             )
 
-            # Build tools list - use memory search if memory_service is available
-            # Note: Google Search disabled - can't mix search tools with function calling
-            tools_list = []
-            if self.memory_service and user_id:
-                tools_list.append(SEARCH_MEMORY_TOOL)
-
-            # Configure generation parameters
-            config = types.GenerateContentConfig(
-                temperature=self.temperature,
-                max_output_tokens=self.max_tokens,
-                system_instruction=system_prompt_with_time,
-                tools=tools_list,
+            # Create session with conversation history
+            effective_user_id = user_id or "anonymous"
+            session = await self._create_session_with_history(
+                user_id=effective_user_id,
+                history=history,
             )
 
-            # First LLM call
-            response = await self.client.aio.models.generate_content(
-                model=current_model,
-                contents=contents,
-                config=config,
-            )
+            # Get the latest message to send
+            last_message = history[-1]
+            last_content = last_message.get("content", "")
+            attachments = last_message.get("attachments", [])
 
-            if not response:
-                self.logger.warning("Received empty response from Google Gen AI")
+            # Build the new message content
+            parts = [types.Part.from_text(text=last_content)] if last_content else []
+
+            for attachment in attachments:
+                base64_data = attachment.get("base64")
+                mime_type = attachment.get("mime_type", "image/jpeg")
+                if base64_data and isinstance(base64_data, str):
+                    try:
+                        image_bytes = base64.b64decode(base64_data)
+                        parts.append(
+                            types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+                        )
+                    except Exception as e:
+                        self.logger.warning("Failed to decode attachment: %s", e)
+
+            new_message = types.Content(role="user", parts=parts)
+
+            # Run the agent and collect the final response
+            final_response = ""
+
+            async for event in runner.run_async(
+                user_id=effective_user_id,
+                session_id=session.id,
+                new_message=new_message,
+            ):
+                # Check for final response
+                if event.is_final_response():
+                    if event.content and event.content.parts:
+                        for part in event.content.parts:
+                            if hasattr(part, "text") and part.text:
+                                final_response += part.text
+
+            # Clean up user context
+            self._current_user_id = None
+
+            if not final_response:
+                self.logger.warning("ADK returned empty response")
                 return ""
 
-            # Check for function call (tool use)
-            if await self._handle_tool_calls(
-                response, contents, current_model, config, user_id
-            ):
-                # Tool was called, make second call with results
-                response = await self.client.aio.models.generate_content(
-                    model=current_model,
-                    contents=contents,
-                    config=config,
-                )
-
-            # Extract final text response
-            if response and response.text:
-                return response.text
-
-            # Check for safety blocking if no text
-            if (
-                response
-                and response.candidates
-                and response.candidates[0].finish_reason == "SAFETY"
-            ):
-                self.logger.warning(
-                    f"Response blocked due to safety: {response.candidates[0].safety_ratings}"
-                )
-                return (
-                    "I'm sorry, I couldn't process your request due to safety filters."
-                )
-
-            return ""
+            return final_response
 
         except Exception as e:
-            self.logger.error(
-                f"Error getting response from Google Gen AI: {e}", exc_info=True
-            )
+            self.logger.error("Error getting response from ADK: %s", e, exc_info=True)
+            self._current_user_id = None
             return "I'm sorry, I couldn't process your request at the moment."
-
-    async def _handle_tool_calls(
-        self,
-        response,
-        contents: list[types.Content],
-        model: str,
-        config: types.GenerateContentConfig,
-        user_id: str | None,
-    ) -> bool:
-        """
-        Handle function calls from the LLM response.
-
-        Returns True if a tool was called and contents were updated.
-        """
-        if not response.candidates:
-            return False
-
-        candidate = response.candidates[0]
-        if not candidate.content or not candidate.content.parts:
-            return False
-
-        tool_called = False
-
-        for part in candidate.content.parts:
-            if not hasattr(part, "function_call") or not part.function_call:
-                continue
-
-            function_call = part.function_call
-            function_name = function_call.name
-
-            self.logger.info(f"LLM requested tool: {function_name}")
-
-            if function_name == "search_memory" and self.memory_service and user_id:
-                # Execute memory search
-                result = await self._execute_search_memory(function_call.args, user_id)
-
-                # Add the function call and response to contents
-                contents.append(types.Content(role="model", parts=[part]))
-                contents.append(
-                    types.Content(
-                        role="user",
-                        parts=[
-                            types.Part.from_function_response(
-                                name="search_memory",
-                                response={"result": result},
-                            )
-                        ],
-                    )
-                )
-                tool_called = True
-
-        return tool_called
-
-    async def _execute_search_memory(self, args: dict, user_id: str) -> str:
-        """
-        Execute a memory search and return formatted results.
-        """
-        query = args.get("query", "")
-        category = args.get("category")
-
-        self.logger.info(
-            f"Searching memory for user {user_id}: query='{query}', category={category}"
-        )
-
-        try:
-            if self.memory_service is None:
-                return "Memory service not available."
-            memories = self.memory_service.search(
-                query=query,
-                user_id=user_id,
-                category=category,
-                limit=5,
-            )
-
-            if not memories:
-                return "No relevant memories found for this query."
-
-            # Format memories for the LLM
-            # Categories are embedded in the text as "[CATEGORY] text"
-            from app.services.MemoryService.memory_service import (
-                parse_embedded_category,
-            )
-
-            formatted = []
-            for mem in memories:
-                text = mem.get("memory") or mem.get("text", "")
-                cat, clean_text = parse_embedded_category(text)
-                formatted.append(f"[{cat}] {clean_text}")
-
-            result = "\n".join(formatted)
-            self.logger.info(f"Found {len(memories)} memories for query '{query}'")
-            return result
-
-        except Exception as e:
-            self.logger.error(f"Memory search failed: {e}")
-            return f"Memory search failed: {str(e)}"
 
     @observe()
     async def capture_facts_from_history(
@@ -357,7 +439,6 @@ class NeibotService(NeibotServiceInterface):
             if not conversation_text.strip():
                 return 0
 
-            # memory_service is checked in capture_facts_from_history
             if self.memory_service is None:
                 return 0
             result = self.memory_service.add(
@@ -379,60 +460,8 @@ class NeibotService(NeibotServiceInterface):
             return memories_created
 
         except Exception as e:
-            self.logger.error(f"Error capturing with mem0: {e}", exc_info=True)
+            self.logger.error("Error capturing with mem0: %s", e, exc_info=True)
             return 0
-
-    def _build_contents(self, history: list[MessagePayload]) -> list[types.Content]:
-        """
-        Convert internal MessagePayload history to Google Gen AI Content objects.
-        """
-        contents: list[types.Content] = []
-
-        for msg in history:
-            role = msg.get("role", "user")
-
-            # Map roles to Google Gen AI (user, model)
-            # System prompt is handled in config, skip system messages here
-            if role == "system":
-                continue
-            elif role == "assistant":
-                genai_role = "model"
-            else:
-                genai_role = "user"
-
-            content_text = msg.get("content", "")
-            attachments = msg.get("attachments", [])
-
-            parts: list[types.Part] = []
-
-            # Add text part
-            if content_text:
-                parts.append(types.Part.from_text(text=content_text))
-
-            # Add images
-            for attachment in attachments:
-                base64_data = attachment.get("base64")
-                mime_type = attachment.get("mime_type", "image/jpeg")
-
-                if base64_data and isinstance(base64_data, str):
-                    try:
-                        image_bytes = base64.b64decode(base64_data)
-                        parts.append(
-                            types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
-                        )
-                    except Exception as e:
-                        self.logger.warning(f"Failed to decode attachment: {e}")
-                        continue
-                else:
-                    self.logger.warning(
-                        "Attachment missing base64 data or invalid format"
-                    )
-                    continue
-
-            if parts:
-                contents.append(types.Content(role=genai_role, parts=parts))
-
-        return contents
 
     def _load_distill_prompt(self) -> str:
         """
@@ -465,6 +494,9 @@ class NeibotService(NeibotServiceInterface):
 
         This method is called when a response exceeds Telegram's character limit.
         It applies the 4-movement distillation protocol to condense the response.
+
+        Note: This method uses the direct GenAI client (not ADK) as it's a single-turn
+        operation without tool requirements.
 
         Args:
             original_response: The original response that was too long
@@ -514,7 +546,6 @@ class NeibotService(NeibotServiceInterface):
                 max_output_tokens=900,
                 # Allow the model to reason internally with up to 1024 tokens
                 # for better distillation quality, while keeping final output ≤ 900 tokens.
-                # thinking_budget and max_output_tokens are independent parameters.
                 thinking_config=types.ThinkingConfig(thinking_budget=1024),
             )
 
@@ -545,5 +576,5 @@ class NeibotService(NeibotServiceInterface):
             return "Error: No pude destilar la respuesta. Por favor, intenta de nuevo."
 
         except Exception as e:
-            self.logger.error(f"Error distilling response: {e}", exc_info=True)
+            self.logger.error("Error distilling response: %s", e, exc_info=True)
             return "Error: No pude procesar la destilación de la respuesta."

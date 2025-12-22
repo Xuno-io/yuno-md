@@ -1,6 +1,11 @@
+"""
+Unit tests for NeibotService with Google ADK integration.
+
+Tests cover the ADK-based agent execution, tool creation, session management,
+memory capture, and response distillation.
+"""
+
 import logging
-import base64
-from typing import cast
 from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
@@ -18,263 +23,431 @@ def logger() -> logging.Logger:
 @pytest.fixture
 def neibot_service(logger: logging.Logger) -> NeibotService:
     """Create a NeibotService instance for testing."""
-    with patch("app.services.NeibotService.neibot_service.genai.Client") as MockClient:
-        # Setup the mock client structure
-        mock_client_instance = MockClient.return_value
-        mock_client_instance.aio.models.generate_content = AsyncMock()
+    with patch(
+        "app.services.NeibotService.neibot_service.genai.Client"
+    ) as MockGenAIClient:
+        with patch(
+            "app.services.NeibotService.neibot_service.InMemorySessionService"
+        ) as MockSessionService:
+            # Setup the mock genai client for distillation
+            mock_genai_instance = MockGenAIClient.return_value
+            mock_genai_instance.aio.models.generate_content = AsyncMock()
 
-        service = NeibotService(
-            system_prompt="You are a helpful assistant.",
-            model_name="gemini-pro",
-            location="us-central1",
-            project_id="test-project",
-            temperature=0.7,
-            max_tokens=1000,
-            logger=logger,
-            cache_threshold=2048,
-        )
-        return service
+            # Setup the mock session service
+            mock_session_service_instance = MockSessionService.return_value
+            mock_session_service_instance.create_session = AsyncMock()
+            mock_session_service_instance.append_event = AsyncMock()
+
+            service = NeibotService(
+                system_prompt="You are a helpful assistant.",
+                model_name="gemini-pro",
+                location="us-central1",
+                project_id="test-project",
+                temperature=0.7,
+                max_tokens=1000,
+                logger=logger,
+                cache_threshold=2048,
+            )
+            return service
 
 
-class TestBuildContentsAttachmentHandling:
-    """Test cases for safe attachment handling in _build_contents."""
+class TestNeibotServiceInitialization:
+    """Test cases for NeibotService initialization."""
 
-    def test_build_contents_skips_attachment_without_base64(
+    def test_initialization_sets_correct_attributes(
         self, neibot_service: NeibotService
     ) -> None:
-        """Test that attachments without base64 are skipped with a warning."""
-        history: list[MessagePayload] = [
-            cast(
-                MessagePayload,
-                {
-                    "role": "user",
-                    "content": "Look at this image",
-                    "attachments": [
-                        {
-                            "mime_type": "image/png",
-                            "size_bytes": 100,
-                            "file_name": "image.png",
-                            # Missing base64 key
-                        }
-                    ],
-                },
-            )
+        """Test that all attributes are set correctly during initialization."""
+        assert neibot_service.system_prompt == "You are a helpful assistant."
+        assert neibot_service.model_name == "gemini-pro"
+        assert neibot_service.location == "us-central1"
+        assert neibot_service.project_id == "test-project"
+        assert neibot_service.temperature == 0.7
+        assert neibot_service.max_tokens == 1000
+
+    def test_default_model_names(self, logger: logging.Logger) -> None:
+        """Test that default model names are set correctly."""
+        with patch("app.services.NeibotService.neibot_service.genai.Client"):
+            with patch(
+                "app.services.NeibotService.neibot_service.InMemorySessionService"
+            ):
+                service = NeibotService(
+                    system_prompt="Test",
+                    model_name="gemini-pro",
+                    location="us-central1",
+                    project_id="test-project",
+                    temperature=0.7,
+                    max_tokens=1000,
+                    logger=logger,
+                )
+
+        assert service.extraction_model_name == "gemini-2.0-flash"
+        assert service.distill_model_name == "gemini-2.5-pro"
+
+    def test_custom_model_names(self, logger: logging.Logger) -> None:
+        """Test that custom model names are used when provided."""
+        with patch("app.services.NeibotService.neibot_service.genai.Client"):
+            with patch(
+                "app.services.NeibotService.neibot_service.InMemorySessionService"
+            ):
+                service = NeibotService(
+                    system_prompt="Test",
+                    model_name="gemini-pro",
+                    location="us-central1",
+                    project_id="test-project",
+                    temperature=0.7,
+                    max_tokens=1000,
+                    logger=logger,
+                    extraction_model_name="custom-extraction",
+                    distill_model_name="custom-distill",
+                )
+
+        assert service.extraction_model_name == "custom-extraction"
+        assert service.distill_model_name == "custom-distill"
+
+
+class TestCreateAgent:
+    """Test cases for agent creation."""
+
+    def test_create_agent_includes_web_search_tool(
+        self, neibot_service: NeibotService
+    ) -> None:
+        """Test that web_search tool is included in the agent."""
+        with patch("app.services.NeibotService.neibot_service.Agent") as MockAgent:
+            neibot_service._create_agent("gemini-pro")
+
+            MockAgent.assert_called_once()
+            call_kwargs = MockAgent.call_args[1]
+            tools = call_kwargs["tools"]
+
+            # Should have at least web_search tool
+            assert len(tools) >= 1
+            # Check that web_search is in tools (it's a function)
+            tool_names = [getattr(t, "__name__", str(t)) for t in tools]
+            assert "web_search" in tool_names
+
+    def test_create_agent_includes_memory_tool_when_service_available(
+        self, neibot_service: NeibotService
+    ) -> None:
+        """Test that search_memory tool is included when memory service exists."""
+        mock_memory = MagicMock()
+        neibot_service.memory_service = mock_memory
+
+        with patch("app.services.NeibotService.neibot_service.Agent") as MockAgent:
+            neibot_service._create_agent("gemini-pro")
+
+            call_kwargs = MockAgent.call_args[1]
+            tools = call_kwargs["tools"]
+
+            # Should have both web_search and search_memory
+            assert len(tools) == 2
+
+    def test_create_agent_includes_time_in_instruction(
+        self, neibot_service: NeibotService
+    ) -> None:
+        """Test that current UTC time is included in the agent instruction."""
+        with patch("app.services.NeibotService.neibot_service.Agent") as MockAgent:
+            neibot_service._create_agent("gemini-pro")
+
+            call_kwargs = MockAgent.call_args[1]
+            instruction = call_kwargs["instruction"]
+
+            assert "Current time (UTC):" in instruction
+
+
+class TestSearchMemoryTool:
+    """Test cases for the search_memory tool."""
+
+    @pytest.mark.asyncio
+    async def test_search_memory_success(self, neibot_service: NeibotService) -> None:
+        """Test successful memory search execution."""
+        mock_memory = MagicMock()
+        mock_memory.search.return_value = [
+            {"memory": "[TECH_STACK] Uses Python"},
+            {"memory": "[TECH_STACK] Uses Redis"},
         ]
+        neibot_service.memory_service = mock_memory
+        neibot_service._current_user_id = "user_123"
 
-        with patch.object(neibot_service.logger, "warning") as mock_warning:
-            contents = neibot_service._build_contents(history)
+        # Get the tool function
+        search_memory = neibot_service._create_search_memory_tool()
 
-        # Should have one user content (system is handled in config now)
-        # The user content should only have the text part
-        assert len(contents) == 1
-        assert contents[0].role == "user"
-        assert len(contents[0].parts) == 1
-        assert contents[0].parts[0].text == "Look at this image"
+        result = await search_memory(query="tech stack", category="TECH_STACK")
 
-        # Verify warning was called for missing base64
-        mock_warning.assert_called_once()
-        assert "missing base64 data" in str(mock_warning.call_args).lower()
+        assert result["status"] == "success"
+        assert "Uses Python" in result["result"]
+        assert "Uses Redis" in result["result"]
 
-    def test_build_contents_skips_attachment_with_empty_base64(
+    @pytest.mark.asyncio
+    async def test_search_memory_no_results(
+        self, neibot_service: NeibotService
+    ) -> None:
+        """Test memory search with no results."""
+        mock_memory = MagicMock()
+        mock_memory.search.return_value = []
+        neibot_service.memory_service = mock_memory
+        neibot_service._current_user_id = "user_123"
+
+        search_memory = neibot_service._create_search_memory_tool()
+        result = await search_memory(query="unknown topic", category="TECH_STACK")
+
+        assert result["status"] == "success"
+        assert "No relevant memories found" in result["result"]
+
+    @pytest.mark.asyncio
+    async def test_search_memory_no_memory_service(
+        self, neibot_service: NeibotService
+    ) -> None:
+        """Test memory search when no memory service available."""
+        neibot_service.memory_service = None
+        neibot_service._current_user_id = "user_123"
+
+        search_memory = neibot_service._create_search_memory_tool()
+        result = await search_memory(query="test", category="TECH_STACK")
+
+        assert result["status"] == "error"
+        assert "not available" in result["result"]
+
+    @pytest.mark.asyncio
+    async def test_search_memory_no_user_id(
+        self, neibot_service: NeibotService
+    ) -> None:
+        """Test memory search when no user context available."""
+        mock_memory = MagicMock()
+        neibot_service.memory_service = mock_memory
+        neibot_service._current_user_id = None
+
+        search_memory = neibot_service._create_search_memory_tool()
+        result = await search_memory(query="test", category="TECH_STACK")
+
+        assert result["status"] == "error"
+        assert "No user context" in result["result"]
+
+    @pytest.mark.asyncio
+    async def test_search_memory_handles_exception(
         self, neibot_service: NeibotService, logger: logging.Logger
     ) -> None:
-        """Test that attachments with empty base64 are skipped."""
-        history: list[MessagePayload] = [
-            cast(
-                MessagePayload,
-                {
-                    "role": "user",
-                    "content": "Look at this image",
-                    "attachments": [
-                        {
-                            "mime_type": "image/png",
-                            "size_bytes": 100,
-                            "base64": "",
-                            "file_name": "image.png",
-                        }
-                    ],
-                },
-            )
-        ]
+        """Test memory search handles exceptions."""
+        mock_memory = MagicMock()
+        mock_memory.search.side_effect = Exception("Search failed")
+        neibot_service.memory_service = mock_memory
+        neibot_service._current_user_id = "user_123"
 
-        contents = neibot_service._build_contents(history)
+        with patch.object(logger, "error") as mock_error:
+            search_memory = neibot_service._create_search_memory_tool()
+            result = await search_memory(query="test", category="TECH_STACK")
 
-        assert len(contents) == 1
-        assert len(contents[0].parts) == 1  # Only text
-        assert contents[0].parts[0].text == "Look at this image"
+        assert result["status"] == "error"
+        assert "failed" in result["result"].lower()
+        mock_error.assert_called()
 
-    def test_build_contents_includes_valid_attachment(
-        self, neibot_service: NeibotService
+
+class TestGetResponse:
+    """Test cases for get_response with ADK."""
+
+    @pytest.mark.asyncio
+    async def test_get_response_empty_history(
+        self, neibot_service: NeibotService, logger: logging.Logger
     ) -> None:
-        """Test that valid attachments are included in the message."""
-        valid_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
-        history: list[MessagePayload] = [
-            {
-                "role": "user",
-                "content": "Look at this image",
-                "attachments": [
-                    {
-                        "mime_type": "image/png",
-                        "size_bytes": 100,
-                        "base64": valid_b64,
-                        "file_name": "image.png",
-                    }
-                ],
-            }
-        ]
+        """Test get_response with empty history returns empty string."""
+        with patch.object(logger, "warning") as mock_warning:
+            result = await neibot_service.get_response([])
 
-        contents = neibot_service._build_contents(history)
-
-        assert len(contents) == 1
-        assert len(contents[0].parts) == 2  # Text + image
-
-        # Check text part
-        assert contents[0].parts[0].text == "Look at this image"
-
-        # Check image part
-        # Since we can't easily inspect the Part object internal bytes without knowing the exact structure (it might be in inline_data),
-        # we assume the library constructs it correctly if we passed it.
-        # But we can check if it's there.
-        image_part = contents[0].parts[1]
-        # Verify it's not text
-        assert image_part.text is None
-        # Verify it has inline_data (Blob)
-        assert image_part.inline_data is not None
-        assert image_part.inline_data.mime_type == "image/png"
-        assert image_part.inline_data.data == base64.b64decode(valid_b64)
-
-    def test_build_contents_uses_default_mime_type(
-        self, neibot_service: NeibotService
-    ) -> None:
-        """Test that default mime_type is used when not provided."""
-        valid_b64 = "YWJjZGVmZw=="
-        history: list[MessagePayload] = [
-            cast(
-                MessagePayload,
-                {
-                    "role": "user",
-                    "content": "Look at this image",
-                    "attachments": [
-                        {
-                            "size_bytes": 100,
-                            "base64": valid_b64,
-                            "file_name": "image.jpg",
-                            # Missing mime_type
-                        }
-                    ],
-                },
-            )
-        ]
-
-        contents = neibot_service._build_contents(history)
-
-        assert len(contents) == 1
-        assert len(contents[0].parts) == 2
-        image_part = contents[0].parts[1]
-        assert image_part.inline_data.mime_type == "image/jpeg"  # Default
-
-    def test_build_contents_handles_system_and_assistant_roles(
-        self, neibot_service: NeibotService
-    ) -> None:
-        """Test that roles are mapped correctly."""
-        history: list[MessagePayload] = [
-            {"role": "system", "content": "System prompt", "attachments": []},
-            {"role": "user", "content": "User msg", "attachments": []},
-            {"role": "assistant", "content": "Assistant msg", "attachments": []},
-        ]
-
-        contents = neibot_service._build_contents(history)
-
-        # System message should be skipped (handled in config)
-        # User -> user
-        # Assistant -> model
-        assert len(contents) == 2
-        assert contents[0].role == "user"
-        assert contents[0].parts[0].text == "User msg"
-
-        assert contents[1].role == "model"
-        assert contents[1].parts[0].text == "Assistant msg"
-
-
-class TestGetResponseHandling:
-    """Test cases for get_response."""
+        assert result == ""
+        mock_warning.assert_called_with("Empty history provided")
 
     @pytest.mark.asyncio
     async def test_get_response_success(self, neibot_service: NeibotService) -> None:
-        """Test successful response."""
-        # Mock successful response
-        mock_response = MagicMock()
-        mock_response.text = "Response text"
-        neibot_service.client.aio.models.generate_content.return_value = mock_response
+        """Test successful response from ADK agent."""
+        # Create mock session
+        mock_session = MagicMock()
+        mock_session.id = "test-session-id"
+        neibot_service.session_service.create_session.return_value = mock_session
 
-        history: list[MessagePayload] = [
-            {"role": "user", "content": "Hello", "attachments": []}
-        ]
+        # Create mock event with final response
+        mock_event = MagicMock()
+        mock_event.is_final_response.return_value = True
+        mock_content = MagicMock()
+        mock_part = MagicMock()
+        mock_part.text = "Hello! How can I help you?"
+        mock_content.parts = [mock_part]
+        mock_event.content = mock_content
 
-        result = await neibot_service.get_response(history)
-        assert result == "Response text"
+        # Setup the runner mock
+        with patch("app.services.NeibotService.neibot_service.Agent"):
+            with patch(
+                "app.services.NeibotService.neibot_service.Runner"
+            ) as MockRunner:
+                mock_runner = MockRunner.return_value
 
-    @pytest.mark.asyncio
-    async def test_get_response_empty_response(
-        self, neibot_service: NeibotService, logger: logging.Logger
-    ) -> None:
-        """Test handling of empty response object."""
-        neibot_service.client.aio.models.generate_content.return_value = None
+                # Create an async generator for run_async
+                async def mock_run_async(*args, **kwargs):
+                    yield mock_event
 
-        history: list[MessagePayload] = [
-            {"role": "user", "content": "Hello", "attachments": []}
-        ]
+                mock_runner.run_async = mock_run_async
 
-        with patch.object(logger, "warning") as mock_warning:
-            result = await neibot_service.get_response(history)
+                history: list[MessagePayload] = [
+                    {"role": "user", "content": "Hello", "attachments": []}
+                ]
 
-        assert result == ""
-        mock_warning.assert_called_with("Received empty response from Google Gen AI")
+                result = await neibot_service.get_response(history)
 
-    @pytest.mark.asyncio
-    async def test_get_response_safety_blocked(
-        self, neibot_service: NeibotService, logger: logging.Logger
-    ) -> None:
-        """Test handling of safety blocked response."""
-        mock_response = MagicMock()
-        mock_response.text = ""  # No text because blocked
-
-        candidate = MagicMock()
-        candidate.finish_reason = "SAFETY"
-        candidate.safety_ratings = ["some ratings"]
-
-        mock_response.candidates = [candidate]
-
-        neibot_service.client.aio.models.generate_content.return_value = mock_response
-
-        history: list[MessagePayload] = [
-            {"role": "user", "content": "Unsafe prompt", "attachments": []}
-        ]
-
-        with patch.object(logger, "warning") as mock_warning:
-            result = await neibot_service.get_response(history)
-
-        assert "couldn't process your request due to safety" in result
-        mock_warning.assert_called()
+        assert result == "Hello! How can I help you?"
 
     @pytest.mark.asyncio
-    async def test_get_response_exception(
+    async def test_get_response_with_custom_model(
+        self, neibot_service: NeibotService
+    ) -> None:
+        """Test get_response uses custom model when provided."""
+        mock_session = MagicMock()
+        mock_session.id = "test-session-id"
+        neibot_service.session_service.create_session.return_value = mock_session
+
+        # Create mock event with empty response
+        mock_event = MagicMock()
+        mock_event.is_final_response.return_value = True
+        mock_event.content = None
+
+        with patch("app.services.NeibotService.neibot_service.Agent") as MockAgent:
+            with patch(
+                "app.services.NeibotService.neibot_service.Runner"
+            ) as MockRunner:
+                mock_runner = MockRunner.return_value
+
+                async def mock_run_async(*args, **kwargs):
+                    yield mock_event
+
+                mock_runner.run_async = mock_run_async
+
+                history: list[MessagePayload] = [
+                    {"role": "user", "content": "Hello", "attachments": []}
+                ]
+
+                await neibot_service.get_response(history, model_name="custom-model")
+
+        # Verify Agent was created with custom model
+        MockAgent.assert_called_once()
+        call_kwargs = MockAgent.call_args[1]
+        assert call_kwargs["model"] == "custom-model"
+
+    @pytest.mark.asyncio
+    async def test_get_response_sets_user_id_context(
+        self, neibot_service: NeibotService
+    ) -> None:
+        """Test that user_id is set for tool access during get_response."""
+        mock_session = MagicMock()
+        mock_session.id = "test-session-id"
+        neibot_service.session_service.create_session.return_value = mock_session
+
+        mock_event = MagicMock()
+        mock_event.is_final_response.return_value = True
+        mock_event.content = None
+
+        with patch("app.services.NeibotService.neibot_service.Agent"):
+            with patch(
+                "app.services.NeibotService.neibot_service.Runner"
+            ) as MockRunner:
+                mock_runner = MockRunner.return_value
+
+                async def mock_run_async(*args, **kwargs):
+                    # Check that user_id was set during execution
+                    assert neibot_service._current_user_id == "user_123"
+                    yield mock_event
+
+                mock_runner.run_async = mock_run_async
+
+                history: list[MessagePayload] = [
+                    {"role": "user", "content": "Hello", "attachments": []}
+                ]
+
+                await neibot_service.get_response(history, user_id="user_123")
+
+        # User ID should be cleared after execution
+        assert neibot_service._current_user_id is None
+
+    @pytest.mark.asyncio
+    async def test_get_response_handles_exception(
         self, neibot_service: NeibotService, logger: logging.Logger
     ) -> None:
-        """Test handling of exceptions during generation."""
-        neibot_service.client.aio.models.generate_content.side_effect = Exception(
-            "API Error"
+        """Test handling of exceptions during agent execution."""
+        neibot_service.session_service.create_session.side_effect = Exception(
+            "Session error"
         )
 
-        history: list[MessagePayload] = [
-            {"role": "user", "content": "Hello", "attachments": []}
-        ]
-
         with patch.object(logger, "error") as mock_error:
+            history: list[MessagePayload] = [
+                {"role": "user", "content": "Hello", "attachments": []}
+            ]
+
             result = await neibot_service.get_response(history)
 
-        assert "couldn't process your request at the moment" in result
+        assert "couldn't process your request" in result
         mock_error.assert_called()
+
+
+class TestCreateSessionWithHistory:
+    """Test cases for session creation with history."""
+
+    @pytest.mark.asyncio
+    async def test_creates_session_with_user_id(
+        self, neibot_service: NeibotService
+    ) -> None:
+        """Test that session is created with correct user_id."""
+        mock_session = MagicMock()
+        mock_session.id = "test-session"
+        neibot_service.session_service.create_session.return_value = mock_session
+
+        await neibot_service._create_session_with_history(
+            user_id="test_user",
+            history=[],
+        )
+
+        neibot_service.session_service.create_session.assert_called_once()
+        call_kwargs = neibot_service.session_service.create_session.call_args[1]
+        assert call_kwargs["user_id"] == "test_user"
+        assert call_kwargs["app_name"] == "yunoai"
+
+    @pytest.mark.asyncio
+    async def test_appends_history_events(self, neibot_service: NeibotService) -> None:
+        """Test that history messages are appended as events."""
+        mock_session = MagicMock()
+        mock_session.id = "test-session"
+        neibot_service.session_service.create_session.return_value = mock_session
+
+        history: list[MessagePayload] = [
+            {"role": "user", "content": "First message", "attachments": []},
+            {"role": "assistant", "content": "First response", "attachments": []},
+            {"role": "user", "content": "Second message", "attachments": []},
+        ]
+
+        await neibot_service._create_session_with_history(
+            user_id="test_user",
+            history=history,
+        )
+
+        # Should append 2 events (history minus the last message)
+        assert neibot_service.session_service.append_event.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_skips_system_messages(self, neibot_service: NeibotService) -> None:
+        """Test that system messages are skipped when building history."""
+        mock_session = MagicMock()
+        mock_session.id = "test-session"
+        neibot_service.session_service.create_session.return_value = mock_session
+
+        history: list[MessagePayload] = [
+            {"role": "system", "content": "System prompt", "attachments": []},
+            {"role": "user", "content": "User message", "attachments": []},
+            {"role": "user", "content": "Latest message", "attachments": []},
+        ]
+
+        await neibot_service._create_session_with_history(
+            user_id="test_user",
+            history=history,
+        )
+
+        # Should only append 1 event (skipping system and last message)
+        assert neibot_service.session_service.append_event.call_count == 1
 
 
 class TestCaptureFactsFromHistory:
@@ -355,64 +528,6 @@ class TestCaptureFactsFromHistory:
         mock_error.assert_called()
 
 
-class TestMemoryToolExecution:
-    """Test cases for memory tool execution."""
-
-    @pytest.mark.asyncio
-    async def test_execute_search_memory_success(
-        self, neibot_service: NeibotService
-    ) -> None:
-        """Test successful memory search execution."""
-        mock_memory = MagicMock()
-        mock_memory.search.return_value = [
-            {"memory": "[TECH_STACK] Uses Python"},
-            {"memory": "[TECH_STACK] Uses Redis"},
-        ]
-        neibot_service.memory_service = mock_memory
-
-        result = await neibot_service._execute_search_memory(
-            args={"query": "tech stack", "category": "TECH_STACK"},
-            user_id="user_123",
-        )
-
-        assert "[TECH_STACK]" in result
-        assert "Uses Python" in result
-
-    @pytest.mark.asyncio
-    async def test_execute_search_memory_no_results(
-        self, neibot_service: NeibotService
-    ) -> None:
-        """Test memory search with no results."""
-        mock_memory = MagicMock()
-        mock_memory.search.return_value = []
-        neibot_service.memory_service = mock_memory
-
-        result = await neibot_service._execute_search_memory(
-            args={"query": "unknown topic", "category": "TECH_STACK"},
-            user_id="user_123",
-        )
-
-        assert "No relevant memories found" in result
-
-    @pytest.mark.asyncio
-    async def test_execute_search_memory_handles_exception(
-        self, neibot_service: NeibotService, logger: logging.Logger
-    ) -> None:
-        """Test memory search handles exceptions."""
-        mock_memory = MagicMock()
-        mock_memory.search.side_effect = Exception("Search failed")
-        neibot_service.memory_service = mock_memory
-
-        with patch.object(logger, "error") as mock_error:
-            result = await neibot_service._execute_search_memory(
-                args={"query": "test", "category": None},
-                user_id="user_123",
-            )
-
-        assert "failed" in result.lower()
-        mock_error.assert_called()
-
-
 class TestDistillResponse:
     """Test cases for the distill_response method."""
 
@@ -431,7 +546,6 @@ class TestDistillResponse:
         result = await neibot_service.distill_response(original_response)
 
         assert result == distilled
-        # Verify the LLM was called
         neibot_service.client.aio.models.generate_content.assert_called_once()
 
     @pytest.mark.asyncio
@@ -456,7 +570,6 @@ class TestDistillResponse:
         )
 
         assert result == distilled
-        # Verify the LLM was called with context in the prompt
         call_args = neibot_service.client.aio.models.generate_content.call_args
         contents = call_args[1]["contents"]
         prompt_text = contents[0].parts[0].text
@@ -507,37 +620,3 @@ class TestDistillResponse:
 
         assert "EL ESTRATO" in prompt or "CUATRO movimientos" in prompt
         mock_warning.assert_called()
-
-    def test_distill_model_name_configurable(self, logger: logging.Logger) -> None:
-        """Test that distill_model_name is configurable."""
-        custom_model = "custom-distill-model"
-
-        with patch("app.services.NeibotService.neibot_service.genai.Client"):
-            service = NeibotService(
-                system_prompt="Test",
-                model_name="gemini-pro",
-                location="us-central1",
-                project_id="test-project",
-                temperature=0.7,
-                max_tokens=1000,
-                logger=logger,
-                distill_model_name=custom_model,
-            )
-
-        assert service.distill_model_name == custom_model
-
-    def test_distill_model_name_default(self, logger: logging.Logger) -> None:
-        """Test that distill_model_name defaults to gemini-2.5-pro."""
-        with patch("app.services.NeibotService.neibot_service.genai.Client"):
-            service = NeibotService(
-                system_prompt="Test",
-                model_name="gemini-pro",
-                location="us-central1",
-                project_id="test-project",
-                temperature=0.7,
-                max_tokens=1000,
-                logger=logger,
-                # No distill_model_name provided
-            )
-
-        assert service.distill_model_name == "gemini-2.5-pro"

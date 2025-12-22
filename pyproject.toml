@@ -9,7 +9,7 @@ packages = [{include = "app"}]
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
 fastapi = "^0.115.12"
-uvicorn = "^0.27.0"
+uvicorn = "^0.34.0"
 pydantic = {extras = ["email"], version = "^2.11.5"}
 sqlalchemy = "^2.0.25"
 python-dotenv = "^1.0.0"
@@ -33,6 +33,7 @@ openai = "^2.8.1"
 openinference-instrumentation-google-genai = "^0.1.8"
 tenacity = "^9.1.2"
 mem0ai = "^1.0.0"
+google-adk = "^1.0.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "7.4.4"
