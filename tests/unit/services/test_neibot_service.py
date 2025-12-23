@@ -85,7 +85,7 @@ class TestNeibotServiceInitialization:
                     logger=logger,
                 )
 
-        assert service.extraction_model_name == "gemini-2.0-flash"
+        assert service.extraction_model_name == "gemini-3-flash-preview"
         assert service.distill_model_name == "gemini-2.5-pro"
 
     def test_custom_model_names(self, logger: logging.Logger) -> None:

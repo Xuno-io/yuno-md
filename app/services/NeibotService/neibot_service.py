@@ -565,7 +565,7 @@ class NeibotService(NeibotServiceInterface):
                 # Tokens differ from characters (typically 1 token ≈ 3-4 characters).
                 # This conservative token cap (900) is chosen to keep output safely
                 # under Telegram's 4096-character limit.
-                max_output_tokens=900,
+                max_output_tokens=2048,  # 1024 for thinking and 1024 for output
                 # Allow the model to reason internally with up to 1024 tokens
                 # for better distillation quality, while keeping final output ≤ 900 tokens.
                 thinking_config=types.ThinkingConfig(thinking_budget=1024),
