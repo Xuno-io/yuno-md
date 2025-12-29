@@ -117,6 +117,7 @@ class MemoryService(MemoryServiceInterface):
                     "model": llm_model,
                     "temperature": 0.0,
                 },
+                "max_tokens": 4096
             },
             "embedder": {
                 "provider": "gemini",  # Not "google"
