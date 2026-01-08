@@ -1,8 +1,8 @@
 [tool.poetry]
-name = "neoreibot"
-version = "0.2.0"
+name = "telegram-bot-adapter"
+version = "1.0.0"
 description = ""
-authors = ["Juan Reyes <juan@yunoai.com>"]
+authors = ["Jack Cloudman <jack@xuno.io>"]
 readme = "README.md"
 packages = [{include = "app"}]
 
@@ -18,7 +18,7 @@ authlib = "^1.6.0"
 httpx = "^0.28.1"
 jinja2 = "^3.1.6"
 aiofiles = "^24.1.0"
-xuno-components = {version = "*", source = "xuno"}
+xuno-components = {version = "0.3.0", source = "xuno"}
 redis = "5.2.1"
 telethon = "^1.41.2"
 langfuse = "^3.8.1"
@@ -27,7 +27,8 @@ google-genai = "^1.52.0"
 openai = "^2.8.1"
 openinference-instrumentation-google-genai = "^0.1.8"
 tenacity = "^9.1.2"
-mem0ai = "^1.0.0"
+mem0ai = { git = "https://github.com/junoai-org/mem0.git", branch = "feature/liteLLM_reasoning_effort" }
+litellm = "^1.80.12"
 google-adk = "^1.0.0"
 
 [tool.poetry.group.dev.dependencies]
@@ -47,5 +48,5 @@ build-backend = "poetry-core.backend"
 
 [[tool.poetry.source]]
 name = "xuno"
-url = "https://xuno-334960984880.d.codeartifact.us-east-1.amazonaws.com/pypi/xuno-pypi/simple/"
+url = "https://us-central1-python.pkg.dev/yunoai-1679262920707/xuno-pypi/simple/"
 priority = "supplemental"
