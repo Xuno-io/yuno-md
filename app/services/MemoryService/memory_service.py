@@ -79,7 +79,7 @@ class MemoryService(MemoryServiceInterface):
         logger: logging.Logger,
         redis_host: str | None = None,
         redis_port: int | None = None,
-        llm_model: str = "gemini-3-flash-preview",
+        llm_model: str = "gemini/gemini-3-flash-preview",
         embedder_model: str = "text-embedding-004",
     ) -> None:
         """
@@ -112,11 +112,14 @@ class MemoryService(MemoryServiceInterface):
                 },
             },
             "llm": {
-                "provider": "gemini",  # Not "google"
+                "provider": "litellm",  # Not "google"
                 "config": {
-                    "model": llm_model,
+                    "model": {
+                        "name": llm_model,
+                        "reasoning_effort": "low",
+                    },
                     "temperature": 0.0,
-                    "max_tokens": 4096
+                    "max_tokens": 8192,
                 },
             },
             "embedder": {

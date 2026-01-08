@@ -67,7 +67,7 @@ def get_neibot_service(components: Components) -> NeibotServiceInterface:
 
     # Model for memory extraction (fast, cheap, structured output)
     extraction_model = configuration.get_configuration(
-        "EXTRACTION_MODEL_NAME", str, default="gemini-3-flash-preview"
+        "EXTRACTION_MODEL_NAME", str, default="gemini/gemini-3-flash-preview"
     )
 
     # Model for response distillation when messages exceed Telegram's limit
@@ -107,7 +107,7 @@ def get_memory_service(components: Components) -> MemoryServiceInterface:
 
     # Model for memory operations
     memory_llm_model = configuration.get_configuration(
-        "MEMORY_LLM_MODEL", str, default="gemini-3-flash-preview"
+        "MEMORY_LLM_MODEL", str, default="gemini/gemini-3-flash-preview"
     )
     memory_embedder_model = configuration.get_configuration(
         "MEMORY_EMBEDDER_MODEL", str, default="text-embedding-004"

@@ -14,7 +14,7 @@ from openinference.instrumentation.google_genai import GoogleGenAIInstrumentor
 
 from telethon import TelegramClient
 from dotenv import load_dotenv
-
+import litellm
 
 load_dotenv()
 
@@ -93,6 +93,7 @@ if not _is_test_environment():
     _validate_otel_env_vars()
 
     GoogleGenAIInstrumentor().instrument()
+    litellm.callbacks = ["langfuse_otel"]
 
 T = TypeVar("T")
 
