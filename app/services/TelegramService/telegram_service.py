@@ -194,7 +194,14 @@ class TelegramService(TelegramServiceInterface):
         context = history[-ROLLING_WINDOW_SIZE:]
 
         context_texts, history_attachments = self._extract_referenced_messages(context)
-        attachments = self._merge_attachment_lists(history_attachments, attachments)
+
+        # Preserve original attachments for caching (before merging with history)
+        current_attachments = attachments
+
+        # Merge history attachments with current for LLM context
+        attachments = self._merge_attachment_lists(
+            history_attachments, current_attachments
+        )
 
         user_segment: str = f"{metadata}: {user_message}" if user_message else metadata
 
@@ -281,11 +288,12 @@ class TelegramService(TelegramServiceInterface):
         # Cache messages for private chats (rolling window)
         if is_private and sent_msg:
             try:
-                # Save user message
+                # Save user message with only current message's attachments
+                # (not merged history attachments to avoid duplication)
                 user_payload: MessagePayload = {
                     "role": "user",
                     "content": user_message,
-                    "attachments": attachments,
+                    "attachments": current_attachments,
                 }
                 self.chat_repository.save_message(
                     event.chat_id, event.id, user_payload, event.reply_to_msg_id
@@ -333,14 +341,22 @@ class TelegramService(TelegramServiceInterface):
                     m for m in cached_messages if m["message_id"] < current_msg_id
                 ]
 
-                # Reverse to get chronological order (oldest first)
-                for cached in reversed(cached_messages[:max_count]):
-                    history.append(cached["payload"])
+                # Only use cache if we have messages after filtering
+                if cached_messages:
+                    # Reverse to get chronological order (oldest first)
+                    for cached in reversed(cached_messages[:max_count]):
+                        history.append(cached["payload"])
 
-                self.logger.info(
-                    "Built recent history with %s cached messages", len(history)
-                )
-                return history
+                    self.logger.info(
+                        "Built recent history with %s cached messages", len(history)
+                    )
+                    return history
+                else:
+                    self.logger.debug(
+                        "Filtered cache is empty for current_msg_id=%s, "
+                        "falling back to Telegram API",
+                        current_msg_id,
+                    )
 
             # Step 2: Fallback to Telegram API if cache is empty
             messages = await self.bot.get_messages(
