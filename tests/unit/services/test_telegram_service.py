@@ -320,6 +320,7 @@ class MockEvent:
         self.chat_id: int = 0
         self.reply_to_msg_id: int | None = None
         self.raw_text: str = ""
+        self.id: int = 999  # Added for rolling window logic
 
     async def reply(self, message: str) -> None:
         self.replied_message = message
@@ -356,7 +357,7 @@ class TestHandleSaveCommand:
         # Mock typing action context manager
         telegram_service.bot = SimpleNamespace(
             action=lambda chat_id, action: AsyncContextManager(),
-            get_messages=AsyncMock(return_value=None),
+            get_messages=AsyncMock(return_value=[]),
         )
 
         asyncio.run(telegram_service._handle_save_command(event))
@@ -383,7 +384,7 @@ class TestHandleSaveCommand:
 
         telegram_service.bot = SimpleNamespace(
             action=lambda chat_id, action: AsyncContextManager(),
-            get_messages=AsyncMock(return_value=None),
+            get_messages=AsyncMock(return_value=[]),
         )
 
         asyncio.run(telegram_service._handle_save_command(event))
@@ -488,6 +489,7 @@ class MockEventWithDistillation:
         self.chat_id: int = 456
         self.reply_to_msg_id: int | None = None
         self.raw_text: str = ""
+        self.id: int = 888  # Added for rolling window logic
         self._fail_first_reply = fail_first_reply
         self._fail_second_reply = fail_second_reply
         self._reply_count = 0

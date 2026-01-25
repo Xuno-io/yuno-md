@@ -31,3 +31,11 @@ class ChatRepositoryInterface:
     ) -> None:
         """Save a message to the history."""
         raise NotImplementedError
+
+    def get_recent_messages(self, chat_id: int, limit: int) -> list[dict]:
+        """Retrieve the most recent messages from a chat.
+
+        Returns a list of dicts with keys `message_id`, `payload` (MessagePayload),
+        and `reply_to_msg_id`. Ordered by message_id descending (newest first).
+        """
+        raise NotImplementedError

@@ -97,3 +97,27 @@ class SqliteChatRepository(ChatRepositoryInterface):
                 json.dumps(payload["attachments"]),
             ),
         )
+
+    def get_recent_messages(self, chat_id: int, limit: int) -> list[dict]:
+        query = """
+        SELECT message_id, reply_to_msg_id, role, content, attachments
+        FROM messages
+        WHERE chat_id = ?
+        ORDER BY message_id DESC
+        LIMIT ?
+        """
+        results = self.db.execute_and_fetchall(query, (chat_id, limit))
+        messages = []
+        for row in results:
+            messages.append(
+                {
+                    "message_id": row["message_id"],
+                    "payload": {
+                        "role": row["role"],
+                        "content": row["content"],
+                        "attachments": json.loads(row["attachments"]),
+                    },
+                    "reply_to_msg_id": row["reply_to_msg_id"],
+                }
+            )
+        return messages
