@@ -38,26 +38,33 @@ async def telegram_service(mock_neibot, mock_client):
 
 
 @pytest.mark.asyncio
-async def test_is_private_chat_returns_true_for_regular_user_chat(telegram_service):
-    """Verify detection of private chats (no megagroup/broadcast flags)."""
+async def test_is_private_chat_returns_true_for_dm(telegram_service):
+    """Verify detection of private chats using Telethon's is_private property."""
     event = AsyncMock()
-    chat = MagicMock()
-    # Private chat lacks these attributes or they are False
-    del chat.megagroup
-    del chat.broadcast
-    event.get_chat.return_value = chat
+    event.is_private = True
 
     is_private = await telegram_service._is_private_chat(event)
     assert is_private is True
 
 
 @pytest.mark.asyncio
-async def test_is_private_chat_returns_false_for_megagroup(telegram_service):
-    """Verify detection of group chats."""
+async def test_is_private_chat_returns_false_for_group(telegram_service):
+    """Verify detection of group chats using Telethon's is_private property."""
     event = AsyncMock()
-    chat = MagicMock()
-    chat.megagroup = True
-    event.get_chat.return_value = chat
+    event.is_private = False
+
+    is_private = await telegram_service._is_private_chat(event)
+    assert is_private is False
+
+
+@pytest.mark.asyncio
+async def test_is_private_chat_returns_false_on_exception(telegram_service):
+    """Verify fallback to False when is_private raises an exception."""
+    event = AsyncMock()
+    # Simulate is_private raising an exception
+    type(event).is_private = property(
+        lambda self: (_ for _ in ()).throw(Exception("test error"))
+    )
 
     is_private = await telegram_service._is_private_chat(event)
     assert is_private is False
@@ -68,11 +75,7 @@ async def test_should_respond_true_in_private_chat_without_command(telegram_serv
     """Verify implicit response in private chat."""
     event = AsyncMock()
     event.raw_text = "hola yuno"
-    # Mock private chat
-    chat = MagicMock()
-    del chat.megagroup
-    del chat.broadcast
-    event.get_chat.return_value = chat
+    event.is_private = True
 
     should = await telegram_service._should_respond(event)
     assert should is True
@@ -84,10 +87,7 @@ async def test_should_respond_false_in_group_chat_without_command(telegram_servi
     event = AsyncMock()
     event.raw_text = "hola amigos"
     event.reply_to_msg_id = None
-    # Mock group chat
-    chat = MagicMock()
-    chat.megagroup = True
-    event.get_chat.return_value = chat
+    event.is_private = False
 
     should = await telegram_service._should_respond(event)
     assert should is False

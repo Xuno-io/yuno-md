@@ -508,18 +508,14 @@ class TelegramService(TelegramServiceInterface):
         await self.bot.run_until_disconnected()
 
     async def _is_private_chat(self, event) -> bool:
-        """Check if message is from a private/DM chat."""
+        """Check if message is from a private/DM chat.
+
+        Uses Telethon's built-in is_private property from ChatGetter,
+        which reliably identifies direct messages vs groups/channels.
+        """
         try:
-            chat = await event.get_chat()
-            # In Telethon, private chats don't have 'megagroup' or 'broadcast' attributes
-            # and usually the chat ID is positive (though bots are negative sometimes).
-            # Reliable way: check if it's a User object or specific chat attributes.
-            # Simpler check: if it lacks group-specific flags.
-            return not getattr(chat, "megagroup", False) and not getattr(
-                chat, "broadcast", False
-            )
+            return event.is_private
         except Exception:
-            # Fallback for edge cases
             return False
 
     async def _should_respond(self, event) -> bool:
