@@ -62,11 +62,14 @@ async def test_is_private_chat_returns_false_for_group(telegram_service):
 @pytest.mark.asyncio
 async def test_is_private_chat_returns_false_on_exception(telegram_service):
     """Verify fallback to False when is_private raises an exception."""
-    event = AsyncMock()
-    # Simulate is_private raising an exception
-    type(event).is_private = property(
-        lambda self: (_ for _ in ()).throw(Exception("test error"))
-    )
+
+    # Use a local class to avoid polluting AsyncMock's class definition
+    class FailingEvent:
+        @property
+        def is_private(self):
+            raise Exception("test error")
+
+    event = FailingEvent()
 
     is_private = await telegram_service._is_private_chat(event)
     assert is_private is False

@@ -106,7 +106,7 @@ class SqliteChatRepository(ChatRepositoryInterface):
         ORDER BY message_id DESC
         LIMIT ?
         """
-        results = self.db.execute_and_fetchall(query, (chat_id, limit))
+        results = self.db.execute_and_fetch(query, (chat_id, limit))
         messages = []
         for row in results:
             messages.append(
