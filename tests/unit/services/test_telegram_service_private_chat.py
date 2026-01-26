@@ -104,10 +104,31 @@ async def test_build_recent_history_rolling_window(telegram_service):
 
     # Mock messages returned by client.get_messages
     # They come newest first usually
-    # Explicitly set photo=None to prevent MagicMock auto-generation
-    msg1 = MagicMock(raw_text="oldest", sender_id=999, media=None, photo=None)  # User
-    msg2 = MagicMock(raw_text="middle", sender_id=12345, media=None, photo=None)  # Bot
-    msg3 = MagicMock(raw_text="newest", sender_id=999, media=None, photo=None)  # User
+    # Explicitly set photo=None, id, and reply_to_msg_id to prevent MagicMock auto-generation
+    msg1 = MagicMock(
+        raw_text="oldest",
+        sender_id=999,
+        media=None,
+        photo=None,
+        id=497,
+        reply_to_msg_id=None,
+    )  # User
+    msg2 = MagicMock(
+        raw_text="middle",
+        sender_id=12345,
+        media=None,
+        photo=None,
+        id=498,
+        reply_to_msg_id=497,
+    )  # Bot
+    msg3 = MagicMock(
+        raw_text="newest",
+        sender_id=999,
+        media=None,
+        photo=None,
+        id=499,
+        reply_to_msg_id=498,
+    )  # User
 
     telegram_service.bot.get_messages.return_value = [msg3, msg2, msg1]
 
@@ -166,10 +187,22 @@ async def test_build_recent_history_filtered_cache_empty_falls_back_to_api(
     event.id = 500  # Current message id
 
     # Mock Telegram API messages (fallback)
-    # Explicitly set photo=None to prevent MagicMock auto-generation
-    msg1 = MagicMock(raw_text="from api oldest", sender_id=999, media=None, photo=None)
+    # Explicitly set photo=None, id, and reply_to_msg_id to prevent MagicMock auto-generation
+    msg1 = MagicMock(
+        raw_text="from api oldest",
+        sender_id=999,
+        media=None,
+        photo=None,
+        id=498,
+        reply_to_msg_id=None,
+    )
     msg2 = MagicMock(
-        raw_text="from api newest", sender_id=12345, media=None, photo=None
+        raw_text="from api newest",
+        sender_id=12345,
+        media=None,
+        photo=None,
+        id=499,
+        reply_to_msg_id=498,
     )
     service.bot.get_messages.return_value = [msg2, msg1]
 
