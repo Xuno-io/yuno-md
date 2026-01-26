@@ -169,11 +169,17 @@ class TelegramService(TelegramServiceInterface):
         # For Free users, we fetch up to the limit to enforce the wall.
         fetch_limit = ROLLING_WINDOW_SIZE if is_pro else max_history_turns
 
-        history: list[MessagePayload] = await self.__build_reply_history(
-            event, fetch_limit
-        )
+        is_private = await self._is_private_chat(event)
 
-        if not is_pro and len(history) >= max_history_turns:
+        if is_private:
+            # Private Chat: Always use Rolling Window (last N messages)
+            # No hard limits, just smooth context sliding.
+            history = await self._build_recent_history(event, ROLLING_WINDOW_SIZE)
+        else:
+            # Group Chat: Explicit threads via replies
+            history = await self.__build_reply_history(event, fetch_limit)
+
+        if not is_private and not is_pro and len(history) >= max_history_turns:
             self.logger.warning(
                 "Conversation history limit reached (%s). Rejecting request.",
                 max_history_turns,
@@ -188,7 +194,14 @@ class TelegramService(TelegramServiceInterface):
         context = history[-ROLLING_WINDOW_SIZE:]
 
         context_texts, history_attachments = self._extract_referenced_messages(context)
-        attachments = self._merge_attachment_lists(history_attachments, attachments)
+
+        # Preserve original attachments for caching (before merging with history)
+        current_attachments = attachments
+
+        # Merge history attachments with current for LLM context
+        attachments = self._merge_attachment_lists(
+            history_attachments, current_attachments
+        )
 
         user_segment: str = f"{metadata}: {user_message}" if user_message else metadata
 
@@ -220,8 +233,11 @@ class TelegramService(TelegramServiceInterface):
                 context, model_name=model_name, user_id=str(event.sender_id)
             )
 
+        sent_msg = None
+        final_response = response  # Track what was actually sent
+
         try:
-            await event.reply(response)
+            sent_msg = await event.reply(response)
         except MessageTooLongError:
             self.logger.warning(
                 "Response too long (%d chars), activating distillation protocol",
@@ -236,7 +252,8 @@ class TelegramService(TelegramServiceInterface):
 
             # Defensive handling: distilled_response might still exceed Telegram's limit
             try:
-                await event.reply(distilled_response)
+                sent_msg = await event.reply(distilled_response)
+                final_response = distilled_response
             except MessageTooLongError:
                 self.logger.warning(
                     "Distilled response still too long (%d chars), truncating to %d chars",
@@ -252,7 +269,8 @@ class TelegramService(TelegramServiceInterface):
                 truncated_response = (
                     distilled_response[-max_content_length:] + truncation_notice
                 )
-                await event.reply(truncated_response)
+                sent_msg = await event.reply(truncated_response)
+                final_response = truncated_response
             except Exception as e:
                 self.logger.error(
                     "Failed to send distilled response (%d chars): %s",
@@ -261,10 +279,129 @@ class TelegramService(TelegramServiceInterface):
                     exc_info=True,
                 )
                 # Send a fallback message to inform the user
-                await event.reply(
+                sent_msg = await event.reply(
                     "Lo siento, hubo un error al enviar la respuesta destilada. "
                     "Por favor, intenta reformular tu pregunta de manera más específica."
                 )
+                final_response = "Error de respuesta"
+
+        # Cache messages for private chats (rolling window)
+        if is_private and sent_msg:
+            try:
+                # Save user message with only current message's attachments
+                # (not merged history attachments to avoid duplication)
+                user_payload: MessagePayload = {
+                    "role": "user",
+                    "content": user_message,
+                    "attachments": current_attachments,
+                }
+                self.chat_repository.save_message(
+                    event.chat_id, event.id, user_payload, event.reply_to_msg_id
+                )
+
+                # Save bot response
+                bot_payload: MessagePayload = {
+                    "role": "assistant",
+                    "content": final_response,
+                    "attachments": [],
+                }
+                self.chat_repository.save_message(
+                    event.chat_id, sent_msg.id, bot_payload, event.id
+                )
+
+                self.logger.debug(
+                    "Cached user message %s and bot response %s", event.id, sent_msg.id
+                )
+            except Exception as cache_err:
+                self.logger.warning("Failed to cache messages: %s", cache_err)
+
+    async def _build_recent_history(
+        self, event, max_count: int
+    ) -> list[MessagePayload]:
+        """
+        Builds history from the most recent messages in the chat (Rolling Window).
+        Used for private chats where context is chronological, not thread-based.
+
+        First attempts to read from cache (DB), then falls back to Telegram API.
+        Any messages fetched from Telegram are saved to cache.
+        """
+        history: list[MessagePayload] = []
+        chat_id = event.chat_id
+        current_msg_id = event.id
+
+        try:
+            # Step 1: Try to get cached messages
+            cached_messages = self.chat_repository.get_recent_messages(
+                chat_id, max_count
+            )
+
+            if cached_messages:
+                # Filter to only messages BEFORE current message
+                cached_messages = [
+                    m for m in cached_messages if m["message_id"] < current_msg_id
+                ]
+
+                # Only use cache if we have messages after filtering
+                if cached_messages:
+                    # Reverse to get chronological order (oldest first)
+                    for cached in reversed(cached_messages[:max_count]):
+                        history.append(cached["payload"])
+
+                    self.logger.info(
+                        "Built recent history with %s cached messages", len(history)
+                    )
+                    return history
+                else:
+                    self.logger.debug(
+                        "Filtered cache is empty for current_msg_id=%s, "
+                        "falling back to Telegram API",
+                        current_msg_id,
+                    )
+
+            # Step 2: Fallback to Telegram API if cache is empty
+            messages = await self.bot.get_messages(
+                chat_id, limit=max_count, max_id=current_msg_id
+            )
+
+            if not messages:
+                return history
+
+            await self.__ensure_identity()
+
+            # Process in reverse order (oldest first)
+            for msg in reversed(messages):
+                if not msg.raw_text and not msg.media:
+                    continue
+
+                role: Literal["assistant", "user"] = (
+                    "assistant" if self.me and msg.sender_id == self.me.id else "user"
+                )
+
+                message_content = msg.raw_text or ""
+
+                attachments = await self._collect_image_attachments(msg, strict=False)
+
+                payload: MessagePayload = {
+                    "role": role,
+                    "content": message_content,
+                    "attachments": attachments,
+                }
+                history.append(payload)
+
+                # Save to cache for future requests
+                self.chat_repository.save_message(
+                    chat_id, msg.id, payload, msg.reply_to_msg_id
+                )
+
+            self.logger.info(
+                "Built recent history with %s messages from Telegram (now cached)",
+                len(history),
+            )
+
+        except Exception as exc:
+            self.logger.error("Error fetching recent history: %s", exc)
+
+        return history
 
     async def __build_metadata(self, event) -> str:
         chat = await event.get_chat()
@@ -386,9 +523,22 @@ class TelegramService(TelegramServiceInterface):
         self.logger.info("Telegram bot started.")
         await self.bot.run_until_disconnected()
 
+    async def _is_private_chat(self, event) -> bool:
+        """Check if message is from a private/DM chat.
+
+        Uses Telethon's built-in is_private property from ChatGetter,
+        which reliably identifies direct messages vs groups/channels.
+        """
+        try:
+            return event.is_private
+        except Exception:
+            return False
+
     async def _should_respond(self, event) -> bool:
         message_text = event.raw_text or ""
         message_text = message_text.strip().lower()
+
+        # 1. Always respond to commands
         if message_text.startswith(self.command_prefix):
             return True
         elif message_text.startswith("/help") or message_text.startswith("/start"):
@@ -398,6 +548,11 @@ class TelegramService(TelegramServiceInterface):
         elif "@yunoaidotcom" in message_text:
             return True
 
+        # 2. Private Chat: Respond to EVERYTHING (Rolling Window)
+        if await self._is_private_chat(event):
+            return True
+
+        # 3. Group Chat: Respond only to replies to bot
         if event.reply_to_msg_id:
             try:
                 replied_msg = await event.get_reply_message()
@@ -556,16 +711,26 @@ class TelegramService(TelegramServiceInterface):
 
     async def _handle_help_command(self, event) -> None:
         """Sends a help message explaining how to use the bot."""
-        help_message = (
-            "¡Hola! Soy Yuno. 🧠\n\n"
-            "Funciono mediante **hilos de conversación** (threads). "
-            "Para mantener el contexto y continuar nuestra charla, es necesario que "
-            "**respondas a mi último mensaje** (Reply).\n\n"
-            f"Para iniciar una conversación escribe: {self.command_prefix} seguido de tu mensaje.\n\n"
-            "Por ejemplo:\n"
-            f"`{self.command_prefix} tengo esta idea y me gustaria que la pongas a prueba`\n\n"
-            "O bien mencionando @yunoaidotcom en tu mensaje.\n\n"
-        )
+        if await self._is_private_chat(event):
+            help_message = (
+                "¡Hola! Soy Yuno. 🧠\n\n"
+                "**En este chat privado, funciono en modo continuo.**\n"
+                "Simplemente escribe tus mensajes y yo te responderé manteniendo el contexto "
+                "de los últimos mensajes.\n\n"
+                "No hace falta usar comandos ni responder (reply) a mensajes específicos, "
+                "solo conversa de forma fluida."
+            )
+        else:
+            help_message = (
+                "¡Hola! Soy Yuno. 🧠\n\n"
+                "Funciono mediante **hilos de conversación** (threads). "
+                "Para mantener el contexto y continuar nuestra charla, es necesario que "
+                "**respondas a mi último mensaje** (Reply).\n\n"
+                f"Para iniciar una conversación escribe: {self.command_prefix} seguido de tu mensaje.\n\n"
+                "Por ejemplo:\n"
+                f"`{self.command_prefix} tengo esta idea y me gustaría que la pongas a prueba`\n\n"
+                "O bien mencionando @yunoaidotcom en tu mensaje.\n\n"
+            )
         await event.reply(help_message)
 
     async def _handle_save_command(self, event) -> None:

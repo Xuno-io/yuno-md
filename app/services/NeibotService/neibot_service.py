@@ -268,8 +268,13 @@ class NeibotService(NeibotServiceInterface):
             if role == "system" or not content_text:
                 continue
 
-            # Map roles: user -> user, assistant -> agent
-            author = "user" if role == "user" else "agent"
+            # Map roles for ADK Event author: user -> user, assistant -> yuno_agent
+            # The author must match the agent name for ADK to recognize it
+            author = "user" if role == "user" else "yuno_agent"
+
+            # Map roles for Gemini API Content: user -> user, assistant -> model
+            # Gemini API only accepts "user" or "model" as valid roles
+            content_role = "user" if role == "user" else "model"
 
             # Create content with text
             parts = [types.Part.from_text(text=content_text)]
@@ -291,7 +296,7 @@ class NeibotService(NeibotServiceInterface):
                         except Exception as e:
                             self.logger.warning("Failed to decode attachment: %s", e)
 
-            content = types.Content(role=author, parts=parts)
+            content = types.Content(role=content_role, parts=parts)
 
             # Create and append event
             event = Event(
