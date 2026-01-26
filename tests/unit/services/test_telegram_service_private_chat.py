@@ -33,7 +33,9 @@ async def telegram_service(mock_neibot, mock_client):
         user_service=MagicMock(),
         admin_ids=[999],
     )
-    await service.start()  # To set self.me
+    # Don't call start() - it blocks on run_until_disconnected()
+    # Instead, set self.me directly from mock_client
+    service.me = await mock_client.get_me()
     return service
 
 
@@ -102,11 +104,15 @@ async def test_build_recent_history_rolling_window(telegram_service):
 
     # Mock messages returned by client.get_messages
     # They come newest first usually
-    msg1 = MagicMock(raw_text="oldest", sender_id=999, media=None)  # User
-    msg2 = MagicMock(raw_text="middle", sender_id=12345, media=None)  # Bot (me)
-    msg3 = MagicMock(raw_text="newest", sender_id=999, media=None)  # User
+    # Explicitly set photo=None to prevent MagicMock auto-generation
+    msg1 = MagicMock(raw_text="oldest", sender_id=999, media=None, photo=None)  # User
+    msg2 = MagicMock(raw_text="middle", sender_id=12345, media=None, photo=None)  # Bot
+    msg3 = MagicMock(raw_text="newest", sender_id=999, media=None, photo=None)  # User
 
     telegram_service.bot.get_messages.return_value = [msg3, msg2, msg1]
+
+    # Patch _collect_image_attachments to avoid awaiting on MagicMock.download_media
+    telegram_service._collect_image_attachments = AsyncMock(return_value=[])
 
     history = await telegram_service._build_recent_history(event, max_count=3)
 
@@ -151,16 +157,24 @@ async def test_build_recent_history_filtered_cache_empty_falls_back_to_api(
         user_service=MagicMock(),
         admin_ids=[999],
     )
-    await service.start()
+    # Don't call start() - it blocks on run_until_disconnected()
+    # Set self.me directly from mock_client
+    service.me = await mock_client.get_me()
 
     event = AsyncMock()
     event.chat_id = 100
     event.id = 500  # Current message id
 
     # Mock Telegram API messages (fallback)
-    msg1 = MagicMock(raw_text="from api oldest", sender_id=999, media=None)
-    msg2 = MagicMock(raw_text="from api newest", sender_id=12345, media=None)
+    # Explicitly set photo=None to prevent MagicMock auto-generation
+    msg1 = MagicMock(raw_text="from api oldest", sender_id=999, media=None, photo=None)
+    msg2 = MagicMock(
+        raw_text="from api newest", sender_id=12345, media=None, photo=None
+    )
     service.bot.get_messages.return_value = [msg2, msg1]
+
+    # Patch _collect_image_attachments to avoid awaiting on MagicMock.download_media
+    service._collect_image_attachments = AsyncMock(return_value=[])
 
     history = await service._build_recent_history(event, max_count=3)
 
@@ -230,7 +244,9 @@ async def test_cache_saves_only_current_attachments_not_merged_history(
         user_service=mock_user_service,
         admin_ids=[999],
     )
-    await service.start()
+    # Don't call start() - it blocks on run_until_disconnected()
+    # Set self.me directly from mock_client
+    service.me = await mock_client.get_me()
 
     # Create event for a private chat message WITHOUT attachments
     event = AsyncMock()

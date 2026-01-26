@@ -718,7 +718,7 @@ class TelegramService(TelegramServiceInterface):
                 "Simplemente escribe tus mensajes y yo te responderé manteniendo el contexto "
                 "de los últimos mensajes.\n\n"
                 "No hace falta usar comandos ni responder (reply) a mensajes específicos, "
-                "solo conversa fluyéndamente."
+                "solo conversa de forma fluida."
             )
         else:
             help_message = (
@@ -728,7 +728,7 @@ class TelegramService(TelegramServiceInterface):
                 "**respondas a mi último mensaje** (Reply).\n\n"
                 f"Para iniciar una conversación escribe: {self.command_prefix} seguido de tu mensaje.\n\n"
                 "Por ejemplo:\n"
-                f"`{self.command_prefix} tengo esta idea y me gustaria que la pongas a prueba`\n\n"
+                f"`{self.command_prefix} tengo esta idea y me gustaría que la pongas a prueba`\n\n"
                 "O bien mencionando @yunoaidotcom en tu mensaje.\n\n"
             )
         await event.reply(help_message)
