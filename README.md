@@ -1,17 +1,131 @@
-# Telegram Bot Adapter (YunoAI)
+# yuno.md
 
-A Telegram bot powered by Google Agent Development Kit (ADK) with long-term memory capabilities using mem0 and Redis.
+> "siento que me van a llamar un llm psycho."
+> — El autor, un día antes del lanzamiento.
 
-## Features
+Este proyecto no es un chatbot. Es un mapa. Un mapa descubierto en las ruinas de un colapso personal, no diseñado en un laboratorio. Su propósito no es la comodidad, es el rigor; porque el rigor es la única herramienta conocida para convertir los pedazos rotos en una estructura funcional.
 
-- **AI-Powered Conversations**: Uses Google Gemini models via ADK for intelligent, context-aware responses
-- **Long-Term Memory**: Semantic memory storage with mem0 and Redis vector store
-- **Memory Categories**: Automatic fact extraction into TECH_STACK, BUSINESS_LOGIC, and USER_CONSTRAINTS
-- **Image Processing**: Supports image attachments in conversations (up to 5MB)
-- **Private & Group Chats**: Different interaction modes for DMs (rolling window) and groups (thread-based)
-- **Response Distillation**: Automatic condensation of long responses that exceed Telegram's 4096 character limit
-- **Observability**: Full tracing with Langfuse for debugging and analytics
-- **Web Search**: Built-in web search tool for real-time information retrieval
+Si buscas un asistente que te dé respuestas fáciles, estás en el lugar equivocado.
+Si buscas una herramienta que te obligue a formular mejores preguntas, bienvenido a la guerra.
+
+---
+
+## Declaración de Guerra
+
+Mi propuesta no busca destruir a 7 mil millones de personas. Busca destruir:
+
+- La burocracia sin sentido que frena la ciencia.
+- Los sistemas educativos que matan la curiosidad.
+- El miedo al fracaso que nos mantiene en trabajos que odiamos.
+- La creencia de que "las cosas son como son".
+- La comodidad de culpar a otros de nuestra propia falta de acción.
+
+---
+
+**A Note on Language:** The technical documentation below is in English. The soul of this project—the `yuno.md` prompt and its philosophy—is in Spanish. It was excavated in that language and its power is tied to its origin. It is not a product to be localized; it is an artifact to be studied. Future translations will emerge from a community that understands its spirit, not from an automated script.
+
+---
+
+## The Arsenal
+
+These are not "features". They are tools of war.
+
+**Combat Memory**
+It doesn't remember your shopping list. It remembers your business logic, your technical constraints, and your working philosophy. Automatically categorizes into TECH_STACK, BUSINESS_LOGIC, and USER_CONSTRAINTS. When you return with a question, the system already knows who you are and what you've built.
+
+**Investment Escalation**
+The system doesn't deploy its full capacity from the first message. You earn its depth. Vague greetings receive concise responses. Concrete ideas activate the complete "Productive Discomfort" protocol.
+
+**Safety Valve**
+If you evade the question three consecutive times, the system declares: "The blockage in this conversation is a mirror of your blockage in the problem". It doesn't let you escape from yourself.
+
+**Forced Rigor**
+It doesn't validate. It questions premises. Exposes weaknesses. Demands concrete action. Ends each exchange with a surgical question or a minimum action plan. Abstract reflection is forbidden.
+
+**Real-Time Intelligence**
+Integrated web search with an epistemic humility protocol: never declares something false without verifying first. Admits when it doesn't know.
+
+**Automatic Distillation**
+Responses exceeding Telegram's limits are automatically condensed. Brevity is a discipline, not a limitation.
+
+---
+
+## The Rite of Entry
+
+Installation is not an obstacle. It's the first test.
+
+### Requirements
+
+- Python 3.11+
+- Redis (for vector memory)
+- Telegram API credentials
+- Google Cloud / Vertex AI credentials
+- Langfuse account (for observability)
+
+### Steps
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/Xuno-io/telegram-bot-adapter.git
+cd telegram-bot-adapter
+
+# 2. Install dependencies with Poetry
+./scripts/configure-poetry-local.sh  # optional
+poetry install
+
+# 3. Configure environment variables
+cp .env-example .env
+# Edit .env with your credentials
+
+# 4. Start Redis
+docker run -d --name redis -p 6379:6379 redis:latest
+
+# 5. Start the bot
+poetry run python main.py
+```
+
+If you can't complete these steps, perhaps this project isn't for you. And that's fine.
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `TELEGRAM_API_ID` | Telegram API ID from [my.telegram.org](https://my.telegram.org/apps) |
+| `TELEGRAM_APP_HASH` | Telegram API Hash |
+| `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
+| `ADMIN_IDS` | Comma-separated list of admin Telegram user IDs |
+| `VERTEX_PROJECT_ID` | Google Cloud project ID |
+| `VERTEX_LOCATION` | Vertex AI location |
+| `GOOGLE_API_KEY` | Google API key for embeddings |
+| `LANGFUSE_PUBLIC_KEY` | Langfuse public key |
+| `LANGFUSE_SECRET_KEY` | Langfuse secret key |
+| `LANGFUSE_HOST` | Langfuse host URL |
+| `REDIS_HOST` | Redis host (default: `localhost`) |
+| `REDIS_PORT` | Redis port (default: `6379`) |
+
+---
+
+## How It Operates
+
+**Private Chats (DMs)**
+Rolling window mode. Responds to all messages. Maintains context from the last 20 messages. No commands needed. Just talk.
+
+**Group Chats**
+Thread-based conversations via replies. Start with `/yuno` command or mention `@yunoaidotcom`. Continue by replying to bot messages.
+
+### Commands
+
+| Command | Function |
+|---------|----------|
+| `/start`, `/help` | Show help |
+| `/save` | Extract and save facts from conversation to memory |
+| `/memory` | View all stored memories |
+| `/memory clear` | Delete all memories |
+| `/yuno <message>` | Start conversation in groups |
+
+---
 
 ## Architecture
 
@@ -21,187 +135,20 @@ A Telegram bot powered by Google Agent Development Kit (ADK) with long-term memo
 │   (Telethon)    │     │                  │     │   (ADK Agent)   │
 └─────────────────┘     └──────────────────┘     └────────┬────────┘
                                                           │
-                        ┌──────────────────┐              │
-                        │  MemoryService   │◄─────────────┘
-                        │  (mem0 + Redis)  │
-                        └──────────────────┘
+                         ┌──────────────────┐             │
+                         │  MemoryService   │◄────────────┘
+                         │  (mem0 + Redis)  │
+                         └──────────────────┘
 ```
 
-## Requirements
+---
 
-- Python 3.11+
-- Redis (for vector memory storage)
-- Telegram API credentials
-- Google Cloud / Vertex AI credentials
-- Langfuse account (for tracing)
-
-## Installation
-
-1. **Clone the repository**
-
-   ```bash
-   git clone https://github.com/Xuno-io/telegram-bot-adapter.git
-   cd telegram-bot-adapter
-   ```
-
-2. **Install dependencies with Poetry**
-
-   ```bash
-   # Configure poetry for local virtualenv (optional)
-   ./scripts/configure-poetry-local.sh
-
-   # Install dependencies
-   poetry install
-   ```
-
-3. **Configure environment variables**
-
-   ```bash
-   cp .env-example .env
-   # Edit .env with your credentials
-   ```
-
-4. **Start Redis** (required for memory service)
-
-   ```bash
-   docker run -d --name redis -p 6379:6379 redis:latest
-   ```
-
-## Configuration
-
-### Environment Variables
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `TELEGRAM_API_ID` | Telegram API ID from [my.telegram.org](https://my.telegram.org/apps) | Yes |
-| `TELEGRAM_APP_HASH` | Telegram API Hash | Yes |
-| `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather | Yes |
-| `ADMIN_IDS` | Comma-separated list of admin Telegram user IDs | Yes |
-| `VERTEX_PROJECT_ID` | Google Cloud project ID | Yes |
-| `VERTEX_LOCATION` | Vertex AI location (e.g., `global`, `us-central1`) | Yes |
-| `GOOGLE_API_KEY` | Google API key for mem0 embeddings | Yes |
-| `LANGFUSE_PUBLIC_KEY` | Langfuse public key | Yes |
-| `LANGFUSE_SECRET_KEY` | Langfuse secret key | Yes |
-| `LANGFUSE_HOST` | Langfuse host URL | Yes |
-| `REDIS_HOST` | Redis host (default: `localhost`) | No |
-| `REDIS_PORT` | Redis port (default: `6379`) | No |
-| `CREATOR_USERNAME` | Bot creator's Telegram username | No |
-
-### Configuration Files
-
-Application configuration is stored in `configuration/`:
-
-- `default.json`: Base configuration
-- `development.json`: Development overrides
-
-## Usage
-
-### Starting the Bot
-
-```bash
-poetry run python main.py
-```
-
-### Bot Commands
-
-| Command | Description |
-|---------|-------------|
-| `/start`, `/help` | Show help message |
-| `/save` | Extract and save facts from conversation to memory |
-| `/memory` | View all stored memories |
-| `/memory clear` | Delete all memories for the user |
-| `/yuno <message>` | Start a conversation (in groups) |
-
-### Interaction Modes
-
-**Private Chats (DMs)**
-- Rolling window mode: Bot responds to all messages
-- Maintains context from the last 20 messages
-- No commands needed, just chat naturally
-
-**Group Chats**
-- Thread-based conversations via replies
-- Start with `/yuno` command or mention `@yunoaidotcom`
-- Continue by replying to bot messages
-
-## Development
-
-### Running Tests
-
-```bash
-# Activate conda environment (if using conda)
-conda activate telegram-bot-adapter
-
-# Run all tests
-poetry run pytest
-
-# Run with coverage
-poetry run pytest --cov=app
-
-# Run specific test file
-poetry run pytest tests/unit/services/test_neibot_service.py -v
-```
-
-### Code Quality
-
-```bash
-# Format code
-poetry run black app tests
-
-# Sort imports
-poetry run isort app tests
-
-# Type checking
-poetry run mypy app
-
-# Linting
-poetry run flake8 app tests
-```
-
-### Pre-commit Hooks
-
-```bash
-# Install pre-commit hooks
-poetry run pre-commit install
-
-# Run all hooks manually
-poetry run pre-commit run --all-files
-```
-
-## Project Structure
-
-```
-telegram-bot-adapter/
-├── app/
-│   ├── bootstrap/          # Application bootstrapping
-│   ├── components/         # Infrastructure components (DB, etc.)
-│   ├── dependencies/       # Dependency injection configuration
-│   ├── entities/           # Domain entities (Message, User)
-│   ├── repositories/       # Data access layer
-│   │   ├── chat_repository/    # Message caching
-│   │   └── user_repository/    # User data
-│   ├── services/           # Business logic
-│   │   ├── MemoryService/      # Long-term memory (mem0)
-│   │   ├── NeibotService/      # AI agent (ADK)
-│   │   ├── TelegramService/    # Telegram integration
-│   │   └── UserService/        # User management
-│   └── tools/              # Agent tools (web search, etc.)
-├── configuration/          # JSON configuration files
-├── docs/                   # Documentation
-├── tests/                  # Test suite
-│   ├── conftest.py
-│   └── unit/
-├── main.py                 # Application entry point
-├── pyproject.toml          # Poetry configuration
-└── README.md
-```
-
-## Key Technologies
+## Technologies
 
 | Component | Technology |
 |-----------|------------|
 | Telegram Client | [Telethon](https://docs.telethon.dev/) |
-| AI Agent Framework | [Google ADK](https://github.com/google/adk-python) |
+| Agent Framework | [Google ADK](https://github.com/google/adk-python) |
 | LLM Provider | Google Gemini (via Vertex AI) |
 | Memory/Vector Store | [mem0](https://github.com/mem0ai/mem0) + Redis |
 | Tracing | [Langfuse](https://langfuse.com/) |
@@ -210,53 +157,76 @@ telegram-bot-adapter/
 | Database | SQLite (message cache) |
 | Package Manager | [Poetry](https://python-poetry.org/) |
 
-## Memory System
+---
 
-The bot uses mem0 for long-term memory with automatic fact extraction:
+## Development
 
-### Categories
+```bash
+# Activate conda environment
+conda activate telegram-bot-adapter
 
-- **TECH_STACK**: Libraries, frameworks, infrastructure, APIs, architecture
-- **BUSINESS_LOGIC**: Rules, constraints, budgets, deadlines, workflows
-- **USER_CONSTRAINTS**: Limitations, preferences, working style
+# Run tests
+poetry run pytest
 
-### How It Works
+# Tests with coverage
+poetry run pytest --cov=app
 
-1. User runs `/save` command
-2. Bot analyzes recent conversation history
-3. Facts are extracted and categorized automatically
-4. Memories are stored in Redis with semantic embeddings
-5. Agent can search memories using the `search_memory` tool
+# Formatting
+poetry run black app tests
+poetry run isort app tests
 
-## Troubleshooting
+# Type checking
+poetry run mypy app
 
-### Common Issues
+# Linting
+poetry run flake8 app tests
 
-**Bot not responding in groups**
-- Ensure the bot has permission to read messages
-- Use `/yuno` command or mention `@yunoaidotcom`
-- Reply to bot messages to continue the conversation
+# Pre-commit hooks
+poetry run pre-commit install
+poetry run pre-commit run --all-files
+```
 
-**Memory service not available**
-- Check Redis is running: `redis-cli ping`
-- Verify `GOOGLE_API_KEY` is set for embeddings
+---
 
-**Long responses getting cut off**
-- The bot automatically distills responses exceeding 4096 characters
-- If still too long, responses are truncated with a notice
+## Project Structure
+
+```
+telegram-bot-adapter/
+├── app/
+│   ├── bootstrap/          # Application bootstrapping
+│   ├── components/         # Infrastructure components
+│   ├── dependencies/       # Dependency injection configuration
+│   ├── entities/           # Domain entities (Message, User)
+│   ├── repositories/       # Data access layer
+│   ├── services/           # Business logic
+│   │   ├── MemoryService/  # Long-term memory (mem0)
+│   │   ├── NeibotService/  # AI agent (ADK)
+│   │   ├── TelegramService/# Telegram integration
+│   │   └── UserService/    # User management
+│   └── tools/              # Agent tools
+├── configuration/          # JSON configuration files
+├── docs/                   # Documentation
+├── tests/                  # Test suite
+├── main.py                 # Entry point
+└── pyproject.toml          # Poetry configuration
+```
+
+---
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+GNU General Public License v3.0 — see [LICENSE](LICENSE).
+
+---
 
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
+2. Create a branch: `git checkout -b feature/my-feature`
 3. Make your changes and add tests
 4. Run the test suite: `poetry run pytest`
 5. Submit a pull request
 
 ---
 
-Built with ❤️ by [Jack Cloudman](mailto:jack@xuno.io)
+Forged from necessity by [Jack Cloudman](mailto:jack@xuno.io).
