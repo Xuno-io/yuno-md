@@ -40,7 +40,7 @@ A Telegram bot powered by Google Agent Development Kit (ADK) with long-term memo
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/your-org/telegram-bot-adapter.git
+   git clone https://github.com/Xuno-io/telegram-bot-adapter.git
    cd telegram-bot-adapter
    ```
 
