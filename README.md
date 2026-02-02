@@ -247,7 +247,7 @@ The bot uses mem0 for long-term memory with automatic fact extraction:
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
 
 ## Contributing
 
