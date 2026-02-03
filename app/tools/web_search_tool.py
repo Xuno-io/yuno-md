@@ -39,7 +39,7 @@ def _get_client() -> Client:
     global _client
     if _client is None:
         project_id = os.getenv("VERTEX_PROJECT_ID", "").strip() or None
-        location = os.getenv("VERTEX_LOCATION", "us-central1")
+        location = os.getenv("VERTEX_LOCATION", "global")
         _client = genai.Client(
             vertexai=True,
             project=project_id,
