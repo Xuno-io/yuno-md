@@ -92,7 +92,7 @@ async def web_search(query: str) -> dict:
 
         # Use Gemini Flash for fast, cost-effective search
         # The model is configured to use Google Search grounding
-        search_model = os.getenv("SEARCH_MODEL_NAME", "gemini-2.0-flash")
+        search_model = os.getenv("SEARCH_MODEL_NAME", "gemini-3-flash-preview")
 
         # Configure the request with Google Search grounding enabled
         # Using dynamic retrieval for optimal results
