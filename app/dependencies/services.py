@@ -7,6 +7,7 @@ from app.services.NeibotService.neibot_service import NeibotService
 
 from app.services.MemoryService.memory_service_interface import MemoryServiceInterface
 from app.services.MemoryService.memory_service import MemoryService
+from app.services.McpService.mcp_manager import McpManager
 from app.services.TelegramService.telegram_service import TelegramService
 from app.services.TelegramService.telegram_service_interface import (
     TelegramServiceInterface,
@@ -75,6 +76,9 @@ def get_neibot_service(components: Components) -> NeibotServiceInterface:
         "DISTILL_MODEL_NAME", str, default="gemini-2.5-pro"
     )
 
+    # Load MCP server toolsets from configuration
+    mcp_toolsets = _get_mcp_toolsets(components)
+
     return NeibotService(
         system_prompt=system_prompt,
         model_name=model_name,
@@ -87,7 +91,30 @@ def get_neibot_service(components: Components) -> NeibotServiceInterface:
         memory_service=get_memory_service(components),
         extraction_model_name=extraction_model,
         distill_model_name=distill_model,
+        mcp_toolsets=mcp_toolsets,
     )
+
+
+def _get_mcp_toolsets(components: Components) -> list:
+    """
+    Load MCP server toolsets from the configured JSON file.
+
+    Returns an empty list if the config file is missing or no servers
+    are enabled, ensuring the bot always starts even without MCP servers.
+    """
+    configuration = components.get_component(ConfigurationInterface)
+    logger = components.get_component(LoggerInterface).get_logger("McpManager")
+
+    mcp_config_path = configuration.get_configuration(
+        "MCP_SERVERS_CONFIG", str, default="configuration/mcp_servers.json"
+    )
+
+    try:
+        manager = McpManager(config_path=mcp_config_path, logger=logger)
+        return manager.get_toolsets()
+    except Exception as exc:
+        logger.error("Failed to initialize McpManager: %s", exc, exc_info=True)
+        return []
 
 
 def get_memory_service(components: Components) -> MemoryServiceInterface:
@@ -110,7 +137,7 @@ def get_memory_service(components: Components) -> MemoryServiceInterface:
         "MEMORY_LLM_MODEL", str, default="gemini/gemini-3-flash-preview"
     )
     memory_embedder_model = configuration.get_configuration(
-        "MEMORY_EMBEDDER_MODEL", str, default="text-embedding-004"
+        "MEMORY_EMBEDDER_MODEL", str, default="gemini-embedding-001"
     )
 
     return MemoryService(

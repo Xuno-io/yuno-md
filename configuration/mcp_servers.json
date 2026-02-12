@@ -1,0 +1,21 @@
+{
+  "servers": [
+    {
+      "id": "example-filesystem",
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+      "env": {},
+      "tool_filter": null
+    },
+    {
+      "id": "example-remote",
+      "enabled": false,
+      "type": "sse",
+      "url": "http://localhost:8080/sse",
+      "headers": {},
+      "tool_filter": null
+    }
+  ]
+}

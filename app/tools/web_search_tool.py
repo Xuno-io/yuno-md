@@ -99,6 +99,7 @@ async def web_search(query: str) -> dict:
         config = types.GenerateContentConfig(
             temperature=0.1,  # Low temperature for factual search
             max_output_tokens=1024,
+            thinking_config=types.ThinkingConfig(thinking_level="low"),
             tools=[
                 types.Tool(
                     google_search=types.GoogleSearch(),
