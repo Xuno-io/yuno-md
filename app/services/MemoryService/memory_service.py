@@ -80,7 +80,7 @@ class MemoryService(MemoryServiceInterface):
         redis_host: str | None = None,
         redis_port: int | None = None,
         llm_model: str = "gemini/gemini-3-flash-preview",
-        embedder_model: str = "text-embedding-004",
+        embedder_model: str = "gemini-embedding-001",
     ) -> None:
         """
         Initialize the memory service with mem0 configuration.

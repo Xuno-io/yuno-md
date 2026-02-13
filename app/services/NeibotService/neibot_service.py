@@ -79,6 +79,7 @@ class NeibotService(NeibotServiceInterface):
         memory_service: MemoryServiceInterface | None = None,
         extraction_model_name: str | None = None,
         distill_model_name: str | None = None,
+        mcp_toolsets: list[Any] | None = None,
     ) -> None:
         """
         Initialize the service with Google ADK configuration.
@@ -95,6 +96,7 @@ class NeibotService(NeibotServiceInterface):
             memory_service: mem0-based memory service for long-term memory
             extraction_model_name: Model for fact extraction (defaults to gemini-3-flash-preview)
             distill_model_name: Model for response distillation when messages are too long
+            mcp_toolsets: Optional list of MCPToolset instances from configured MCP servers
         """
         self.system_prompt = system_prompt
         self.model_name = model_name
@@ -107,6 +109,7 @@ class NeibotService(NeibotServiceInterface):
         self.memory_service = memory_service
         self.extraction_model_name = extraction_model_name or "gemini-3-flash-preview"
         self.distill_model_name = distill_model_name or "gemini-2.5-pro"
+        self.mcp_toolsets = mcp_toolsets or []
 
         # Load the distillation prompt from file
         self.distill_prompt = self._load_distill_prompt()
@@ -120,9 +123,10 @@ class NeibotService(NeibotServiceInterface):
         self.session_service = InMemorySessionService()
 
         self.logger.info(
-            "NeibotService initialized with Google ADK. Model: %s, Location: %s",
+            "NeibotService initialized with Google ADK. Model: %s, Location: %s, MCP toolsets: %d",
             self.model_name,
             self.location,
+            len(self.mcp_toolsets),
         )
 
     def _create_search_memory_tool(self) -> Callable:
@@ -217,6 +221,11 @@ class NeibotService(NeibotServiceInterface):
         # Add memory search if memory service is available
         if self.memory_service:
             tools.append(self._create_search_memory_tool())
+
+        # Add MCP toolsets (each MCPToolset handles its own connection and
+        # exposes the remote server's tools to the ADK agent transparently)
+        if self.mcp_toolsets:
+            tools.extend(self.mcp_toolsets)
 
         # Add current UTC time to system prompt
         utc_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
