@@ -5384,7 +5384,7 @@ redis = "^5.2.1"
 type = "git"
 url = "https://github.com/Xuno-io/xuno-components.git"
 reference = "HEAD"
-resolved_reference = "d68a123b6a2c20f5812e2dc8bd3017630eeb32bf"
+resolved_reference = "03632ec10186f3ec5b6677f885d9b8b74af6028b"
 
 [[package]]
 name = "yarl"
