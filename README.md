@@ -60,7 +60,7 @@ Installation is not an obstacle. It's the first test.
 - Redis (for vector memory)
 - Telegram API credentials
 - Google Cloud / Vertex AI credentials
-- Langfuse account (for observability)
+- Langfuse account (optional, for observability)
 
 ### Steps
 
@@ -77,10 +77,16 @@ poetry install
 cp .env-example .env
 # Edit .env with your credentials
 
-# 4. Start Redis
+# 4. Initialize the Telegram session
+poetry run python init_userbot.py
+# Choose between:
+#   1) User bot — uses your personal Telegram account (phone number)
+#   2) Traditional bot — uses a token from @BotFather (no phone number needed)
+
+# 5. Start Redis
 docker run -d --name redis -p 6379:6379 redis:latest
 
-# 5. Start the bot
+# 6. Start the bot
 poetry run python main.py
 ```
 
@@ -99,9 +105,10 @@ If you can't complete these steps, perhaps this project isn't for you. And that'
 | `VERTEX_PROJECT_ID` | Google Cloud project ID |
 | `VERTEX_LOCATION` | Vertex AI location |
 | `GOOGLE_API_KEY` | Google API key for embeddings |
-| `LANGFUSE_PUBLIC_KEY` | Langfuse public key |
-| `LANGFUSE_SECRET_KEY` | Langfuse secret key |
-| `LANGFUSE_HOST` | Langfuse host URL |
+| `LANGFUSE_ENABLED` | Set to `true` to enable Langfuse tracing (default: `false`) |
+| `LANGFUSE_PUBLIC_KEY` | Langfuse public key (required when `LANGFUSE_ENABLED=true`) |
+| `LANGFUSE_SECRET_KEY` | Langfuse secret key (required when `LANGFUSE_ENABLED=true`) |
+| `LANGFUSE_HOST` | Langfuse host URL (required when `LANGFUSE_ENABLED=true`) |
 | `REDIS_HOST` | Redis host (default: `localhost`) |
 | `REDIS_PORT` | Redis port (default: `6379`) |
 

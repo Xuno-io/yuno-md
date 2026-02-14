@@ -39,6 +39,17 @@ def _is_test_environment() -> bool:
     return False
 
 
+def _is_langfuse_enabled() -> bool:
+    """
+    Check if Langfuse tracing is enabled via the LANGFUSE_ENABLED env var.
+
+    Returns:
+        True only if LANGFUSE_ENABLED is explicitly set to 'true' or '1'.
+        Defaults to False when the variable is absent or any other value.
+    """
+    return os.getenv("LANGFUSE_ENABLED", "false").strip().lower() in ("true", "1")
+
+
 def _validate_otel_env_vars() -> None:
     """
     Validate OpenTelemetry/Langfuse environment variables for instrumentation.
@@ -88,12 +99,15 @@ def _validate_otel_env_vars() -> None:
 
 
 # Validate OpenTelemetry/Langfuse environment variables before instrumentation
-# Skip validation and instrumentation in test environment
-if not _is_test_environment():
+# Skip validation and instrumentation in test environment or when Langfuse is disabled
+if not _is_test_environment() and _is_langfuse_enabled():
     _validate_otel_env_vars()
 
     GoogleGenAIInstrumentor().instrument()
     litellm.callbacks = ["langfuse_otel"]
+elif not _is_test_environment():
+    # Disable Langfuse SDK tracing so @observe() decorators become no-ops
+    os.environ["LANGFUSE_TRACING_ENABLED"] = "false"
 
 T = TypeVar("T")
 

@@ -44,4 +44,4 @@ types-psycopg2 = "^2.9.21.20250318"
 
 [build-system]
 requires = ["poetry-core"]
-build-backend = "poetry-core.backend"
+build-backend = "poetry.core.masonry.api"
