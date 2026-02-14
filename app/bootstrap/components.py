@@ -59,8 +59,8 @@ def _validate_otel_env_vars() -> None:
 
 
     1.  **Langfuse Native Integration:** If `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`,
-        and `LANGFUSE_BASE_URL` are all set, validation is skipped, assuming
-        a direct Langfuse integration is being used.
+        and `LANGFUSE_BASE_URL` (or its alias `LANGFUSE_HOST`) are all set,
+        validation is skipped, assuming a direct Langfuse integration is being used.
 
     2.  **Manual OpenTelemetry Configuration:** If the Langfuse variables are not
         fully provided, the function requires `OTEL_EXPORTER_OTLP_ENDPOINT` and
@@ -78,7 +78,10 @@ def _validate_otel_env_vars() -> None:
     # Optionally build headers from Langfuse keys if not provided directly
     langfuse_public_key: str = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
     langfuse_secret_key: str = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
-    langfuse_base_url: str = os.getenv("LANGFUSE_BASE_URL", "").strip()
+    langfuse_base_url: str = (
+        os.getenv("LANGFUSE_BASE_URL", "").strip()
+        or os.getenv("LANGFUSE_HOST", "").strip()
+    )
 
     if langfuse_public_key and langfuse_secret_key and langfuse_base_url:
         return  # Skip validation if Langfuse integration is used
