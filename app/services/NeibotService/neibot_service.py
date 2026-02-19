@@ -25,6 +25,8 @@ from google.adk.sessions import InMemorySessionService, Session
 from google.adk.events import Event
 from langfuse import observe
 
+from app.utils.retry import genai_retry
+
 from app.entities.message import MessagePayload
 from app.services.NeibotService.neibot_service_interface import NeibotServiceInterface
 from app.services.MemoryService.memory_service_interface import MemoryServiceInterface
@@ -38,7 +40,6 @@ if TYPE_CHECKING:
 _current_user_context: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "current_user_id", default=None
 )
-
 
 # Default distillation prompt in case the file is not found
 DEFAULT_DISTILL_PROMPT = """Sistema: Estás operando en un estado de excepción por saturación de flujo (Límite de caracteres).
@@ -127,6 +128,49 @@ class NeibotService(NeibotServiceInterface):
             self.model_name,
             self.location,
             len(self.mcp_toolsets),
+        )
+
+    @genai_retry
+    async def _execute_runner(
+        self,
+        agent: Agent,
+        user_id: str,
+        history: list[MessagePayload],
+        new_message: types.Content,
+    ) -> str:
+        """Execute the ADK runner with retry on transient API errors (429, 502, 503)."""
+        runner = Runner(
+            agent=agent,
+            app_name=ADK_APP_NAME,
+            session_service=self.session_service,
+        )
+        session = await self._create_session_with_history(
+            user_id=user_id, history=history,
+        )
+
+        final_response = ""
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=session.id,
+            new_message=new_message,
+        ):
+            if event.is_final_response():
+                if event.content and event.content.parts:
+                    for part in event.content.parts:
+                        if hasattr(part, "text") and part.text:
+                            final_response += part.text
+        return final_response
+
+    @genai_retry
+    async def _generate_content_with_retry(
+        self,
+        model: str,
+        contents: list[Any],
+        config: types.GenerateContentConfig,
+    ) -> Any:
+        """Call generate_content with retry on transient API errors (429, 502, 503)."""
+        return await self.client.aio.models.generate_content(
+            model=model, contents=contents, config=config,
         )
 
     def _create_search_memory_tool(self) -> Callable:
@@ -354,19 +398,7 @@ class NeibotService(NeibotServiceInterface):
             # Create agent with current model
             agent = self._create_agent(current_model)
 
-            # Create runner
-            runner = Runner(
-                agent=agent,
-                app_name=ADK_APP_NAME,
-                session_service=self.session_service,
-            )
-
-            # Create session with conversation history
             effective_user_id = user_id or "anonymous"
-            session = await self._create_session_with_history(
-                user_id=effective_user_id,
-                history=history,
-            )
 
             # Get the latest message to send
             last_message = history[-1]
@@ -401,24 +433,15 @@ class NeibotService(NeibotServiceInterface):
                     )
                 ]
 
-            # Run the agent and collect the final response
-            final_response = ""
-
+            # Run the agent with retry on 429 and timeout protection
             try:
-                # Set a timeout to prevent indefinite hanging (e.g. tool loop issues)
                 async with asyncio.timeout(300):
-                    async for event in runner.run_async(
+                    final_response = await self._execute_runner(
+                        agent=agent,
                         user_id=effective_user_id,
-                        session_id=session.id,
+                        history=history,
                         new_message=new_message,
-                    ):
-                        # Check for final response
-                        if event.is_final_response():
-                            if event.content and event.content.parts:
-                                for part in event.content.parts:
-                                    if hasattr(part, "text") and part.text:
-                                        final_response += part.text
-
+                    )
             except TimeoutError:
                 self.logger.error("ADK runner execution timed out")
                 return "I apologize, but this request is taking longer than expected. Please try again."
@@ -593,8 +616,8 @@ class NeibotService(NeibotServiceInterface):
                 )
             ]
 
-            # Call the LLM for distillation
-            response = await self.client.aio.models.generate_content(
+            # Call the LLM for distillation (with retry on 429)
+            response = await self._generate_content_with_retry(
                 model=self.distill_model_name,
                 contents=contents,
                 config=config,
