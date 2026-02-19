@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from google import genai
 from google.genai import types
+
+from app.utils.retry import genai_retry
 
 if TYPE_CHECKING:
     from google.genai import Client
@@ -51,6 +53,16 @@ def _get_client() -> Client:
             location,
         )
     return _client
+
+
+@genai_retry
+async def _generate_search_with_retry(
+    client: Client, model: str, contents: list, config: types.GenerateContentConfig,
+) -> Any:
+    """Call generate_content for search with retry on transient API errors (429, 502, 503)."""
+    return await client.aio.models.generate_content(
+        model=model, contents=contents, config=config,
+    )
 
 
 async def web_search(query: str) -> dict:
@@ -127,8 +139,9 @@ Instructions:
 
         _logger.info("Executing web search for query: %s", query[:100])
 
-        # Execute the search call
-        response = await client.aio.models.generate_content(
+        # Execute the search call (with retry on 429)
+        response = await _generate_search_with_retry(
+            client=client,
             model=search_model,
             contents=contents,
             config=config,
