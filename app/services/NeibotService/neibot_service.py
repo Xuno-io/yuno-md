@@ -93,7 +93,7 @@ class NeibotService(NeibotServiceInterface):
             temperature: Model temperature
             max_tokens: Max tokens for generation
             logger: Logger instance
-            cache_threshold: Token threshold (unused in this version, kept for interface)
+            cache_threshold: Min token count for explicit caching (reserved for future use)
             memory_service: mem0-based memory service for long-term memory
             extraction_model_name: Model for fact extraction (defaults to gemini-3-flash-preview)
             distill_model_name: Model for response distillation when messages are too long
@@ -122,6 +122,9 @@ class NeibotService(NeibotServiceInterface):
 
         # Initialize ADK session service (in-memory for stateless per-request usage)
         self.session_service = InMemorySessionService()
+
+        # Cache agents by model name to avoid recreating identical objects per request
+        self._agents: dict[str, Agent] = {}
 
         self.logger.info(
             "NeibotService initialized with Google ADK. Model: %s, Location: %s, MCP toolsets: %d",
@@ -159,6 +162,14 @@ class NeibotService(NeibotServiceInterface):
                     for part in event.content.parts:
                         if hasattr(part, "text") and part.text:
                             final_response += part.text
+                if event.usage_metadata and event.usage_metadata.prompt_token_count:
+                    cached = event.usage_metadata.cached_content_token_count or 0
+                    self.logger.info(
+                        "Cache: %d/%d tokens cached (%.0f%%)",
+                        cached,
+                        event.usage_metadata.prompt_token_count,
+                        (cached / event.usage_metadata.prompt_token_count) * 100,
+                    )
         return final_response
 
     @genai_retry
@@ -249,6 +260,12 @@ class NeibotService(NeibotServiceInterface):
 
         return search_memory
 
+    def _get_or_create_agent(self, model_name: str) -> Agent:
+        """Return a cached Agent for the given model, creating one if needed."""
+        if model_name not in self._agents:
+            self._agents[model_name] = self._create_agent(model_name)
+        return self._agents[model_name]
+
     def _create_agent(self, model_name: str) -> Agent:
         """
         Create an ADK Agent with the configured tools.
@@ -271,17 +288,11 @@ class NeibotService(NeibotServiceInterface):
         if self.mcp_toolsets:
             tools.extend(self.mcp_toolsets)
 
-        # Add current UTC time to system prompt
-        utc_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        instruction_with_time = (
-            f"{self.system_prompt}\n\nCurrent time (UTC): {utc_time}"
-        )
-
         return Agent(
             model=model_name,
             name="yuno_agent",
             description="YunoAI - An intellectual catalyst for founders and creators",
-            instruction=instruction_with_time,
+            instruction=self.system_prompt,
             tools=tools,
         )
 
@@ -395,14 +406,15 @@ class NeibotService(NeibotServiceInterface):
             if current_model != self.model_name:
                 self.logger.info("Using custom model %s", current_model)
 
-            # Create agent with current model
-            agent = self._create_agent(current_model)
+            # Get cached agent for current model (or create if first use)
+            agent = self._get_or_create_agent(current_model)
 
             effective_user_id = user_id or "anonymous"
 
             # Get the latest message to send
             last_message = history[-1]
-            last_content = last_message.get("content", "")
+            utc_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            last_content = f"[Current time: {utc_time}] {last_message.get('content', '')}"
             attachments = last_message.get("attachments", [])
 
             # Build the new message content
@@ -421,17 +433,6 @@ class NeibotService(NeibotServiceInterface):
                         self.logger.warning("Failed to decode attachment: %s", e)
 
             new_message = types.Content(role="user", parts=parts)
-
-            # Check for empty content to avoid API errors
-            if not new_message.parts:
-                self.logger.warning(
-                    "new_message parts empty (no valid content or attachments). Using safe default."
-                )
-                new_message.parts = [
-                    types.Part.from_text(
-                        text="[System note: User sent an empty message or unsupported attachment]"
-                    )
-                ]
 
             # Run the agent with retry on 429 and timeout protection
             try:

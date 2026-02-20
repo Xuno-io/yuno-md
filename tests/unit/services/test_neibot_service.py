@@ -146,17 +146,46 @@ class TestCreateAgent:
             # Should have both web_search and search_memory
             assert len(tools) == 2
 
-    def test_create_agent_includes_time_in_instruction(
+    def test_create_agent_has_static_instruction(
         self, neibot_service: NeibotService
     ) -> None:
-        """Test that current UTC time is included in the agent instruction."""
+        """Test that agent instruction is static (no timestamp) for implicit caching."""
         with patch("app.services.NeibotService.neibot_service.Agent") as MockAgent:
             neibot_service._create_agent("gemini-pro")
 
             call_kwargs = MockAgent.call_args[1]
             instruction = call_kwargs["instruction"]
 
-            assert "Current time (UTC):" in instruction
+            assert instruction == neibot_service.system_prompt
+            assert "Current time" not in instruction
+
+    def test_get_or_create_agent_caches_by_model(
+        self, neibot_service: NeibotService
+    ) -> None:
+        """Test that _get_or_create_agent returns the same object for the same model."""
+        with patch("app.services.NeibotService.neibot_service.Agent") as MockAgent:
+            agent1 = neibot_service._get_or_create_agent("gemini-pro")
+            agent2 = neibot_service._get_or_create_agent("gemini-pro")
+
+            assert agent1 is agent2
+            # Agent constructor should only be called once
+            MockAgent.assert_called_once()
+
+    def test_get_or_create_agent_different_models(
+        self, neibot_service: NeibotService
+    ) -> None:
+        """Test that different models produce different cached agents."""
+        mock_agent_flash = MagicMock()
+        mock_agent_pro = MagicMock()
+        with patch(
+            "app.services.NeibotService.neibot_service.Agent",
+            side_effect=[mock_agent_flash, mock_agent_pro],
+        ) as MockAgent:
+            agent1 = neibot_service._get_or_create_agent("gemini-flash")
+            agent2 = neibot_service._get_or_create_agent("gemini-pro")
+
+            assert agent1 is not agent2
+            assert MockAgent.call_count == 2
 
 
 class TestSearchMemoryTool:
@@ -320,6 +349,48 @@ class TestGetResponse:
         assert result == "Hello! How can I help you?"
 
     @pytest.mark.asyncio
+    async def test_get_response_injects_timestamp_in_user_message(
+        self, neibot_service: NeibotService
+    ) -> None:
+        """Test that UTC timestamp is prepended to the user message, not the instruction."""
+        mock_session = MagicMock()
+        mock_session.id = "test-session-id"
+        cast(
+            Mock, neibot_service.session_service.create_session
+        ).return_value = mock_session
+
+        mock_event = MagicMock()
+        mock_event.is_final_response.return_value = True
+        mock_event.content = None
+        mock_event.usage_metadata = None
+
+        captured_message = None
+
+        with patch("app.services.NeibotService.neibot_service.Agent"):
+            with patch(
+                "app.services.NeibotService.neibot_service.Runner"
+            ) as MockRunner:
+                mock_runner = MockRunner.return_value
+
+                async def mock_run_async(*args, **kwargs):
+                    nonlocal captured_message
+                    captured_message = kwargs.get("new_message")
+                    yield mock_event
+
+                mock_runner.run_async = mock_run_async
+
+                history: list[MessagePayload] = [
+                    {"role": "user", "content": "Hello", "attachments": []}
+                ]
+
+                await neibot_service.get_response(history)
+
+        assert captured_message is not None
+        message_text = captured_message.parts[0].text
+        assert "[Current time:" in message_text
+        assert "Hello" in message_text
+
+    @pytest.mark.asyncio
     async def test_get_response_with_custom_model(
         self, neibot_service: NeibotService
     ) -> None:
@@ -417,14 +488,13 @@ class TestGetResponse:
     async def test_get_response_handles_empty_user_message_content(
         self, neibot_service: NeibotService, logger: logging.Logger
     ) -> None:
-        """Test that empty user message content falls back to placeholder."""
+        """Test that empty user content still gets timestamp prefix."""
         mock_session = MagicMock()
         mock_session.id = "test-session-id"
         cast(
             Mock, neibot_service.session_service.create_session
         ).return_value = mock_session
 
-        # Mock event (response)
         mock_event = MagicMock()
         mock_event.is_final_response.return_value = True
         mock_content = MagicMock()
@@ -432,6 +502,9 @@ class TestGetResponse:
         mock_part.text = "I see nothing."
         mock_content.parts = [mock_part]
         mock_event.content = mock_content
+        mock_event.usage_metadata = None
+
+        captured_message = None
 
         with patch("app.services.NeibotService.neibot_service.Agent"):
             with patch(
@@ -440,36 +513,111 @@ class TestGetResponse:
                 mock_runner = MockRunner.return_value
 
                 async def mock_run_async(*args, **kwargs):
-                    # Capture the new_message passed to runner
-                    new_message = kwargs.get("new_message")
-                    assert new_message is not None
-                    # Verify the fix: empty content replaced by placeholder
-                    assert len(new_message.parts) == 1
-                    # Access text attribute directly as it's a real Part object
-                    assert "[System note:" in new_message.parts[0].text
+                    nonlocal captured_message
+                    captured_message = kwargs.get("new_message")
                     yield mock_event
 
                 mock_runner.run_async = mock_run_async
 
-                # History with empty content ("") and empty attachments
                 history: list[MessagePayload] = [
                     {"role": "user", "content": "", "attachments": []}
                 ]
 
-                # We need to ensure we catch the warning
-                with patch.object(logger, "warning") as mock_warning:
+                await neibot_service.get_response(history)
+
+        # Even with empty content, timestamp is prepended so parts are not empty
+        assert captured_message is not None
+        assert len(captured_message.parts) == 1
+        message_text = captured_message.parts[0].text
+        assert "[Current time:" in message_text
+
+    @pytest.mark.asyncio
+    async def test_get_response_logs_cache_hit(
+        self, neibot_service: NeibotService, logger: logging.Logger
+    ) -> None:
+        """Test that cache hit metrics are logged when usage_metadata reports cached tokens."""
+        mock_session = MagicMock()
+        mock_session.id = "test-session-id"
+        cast(
+            Mock, neibot_service.session_service.create_session
+        ).return_value = mock_session
+
+        mock_event = MagicMock()
+        mock_event.is_final_response.return_value = True
+        mock_event.content = MagicMock()
+        mock_event.content.parts = [MagicMock(text="Response")]
+        mock_event.usage_metadata = MagicMock()
+        mock_event.usage_metadata.cached_content_token_count = 1500
+        mock_event.usage_metadata.prompt_token_count = 3000
+
+        with patch("app.services.NeibotService.neibot_service.Agent"):
+            with patch(
+                "app.services.NeibotService.neibot_service.Runner"
+            ) as MockRunner:
+                mock_runner = MockRunner.return_value
+
+                async def mock_run_async(*args, **kwargs):
+                    yield mock_event
+
+                mock_runner.run_async = mock_run_async
+
+                history: list[MessagePayload] = [
+                    {"role": "user", "content": "Hello", "attachments": []}
+                ]
+
+                with patch.object(logger, "info") as mock_info:
                     await neibot_service.get_response(history)
 
-                    found = False
-                    # Check arguments of all warning calls
-                    for call in mock_warning.call_args_list:
-                        args, _ = call
-                        if args and "new_message parts empty" in args[0]:
-                            found = True
-                            break
-                    assert (
-                        found
-                    ), "Expected warning about empty message parts not found."
+                found = any(
+                    args[0].startswith("Cache:") and args[1] == 1500 and args[2] == 3000
+                    for args, _ in mock_info.call_args_list
+                    if len(args) >= 3
+                )
+                assert found, "Expected cache hit log not found"
+
+    @pytest.mark.asyncio
+    async def test_get_response_logs_cache_miss(
+        self, neibot_service: NeibotService, logger: logging.Logger
+    ) -> None:
+        """Test that cache miss (0 cached tokens) is also logged."""
+        mock_session = MagicMock()
+        mock_session.id = "test-session-id"
+        cast(
+            Mock, neibot_service.session_service.create_session
+        ).return_value = mock_session
+
+        mock_event = MagicMock()
+        mock_event.is_final_response.return_value = True
+        mock_event.content = MagicMock()
+        mock_event.content.parts = [MagicMock(text="Response")]
+        mock_event.usage_metadata = MagicMock()
+        mock_event.usage_metadata.cached_content_token_count = 0
+        mock_event.usage_metadata.prompt_token_count = 2000
+
+        with patch("app.services.NeibotService.neibot_service.Agent"):
+            with patch(
+                "app.services.NeibotService.neibot_service.Runner"
+            ) as MockRunner:
+                mock_runner = MockRunner.return_value
+
+                async def mock_run_async(*args, **kwargs):
+                    yield mock_event
+
+                mock_runner.run_async = mock_run_async
+
+                history: list[MessagePayload] = [
+                    {"role": "user", "content": "Hello", "attachments": []}
+                ]
+
+                with patch.object(logger, "info") as mock_info:
+                    await neibot_service.get_response(history)
+
+                found = any(
+                    args[0].startswith("Cache:") and args[1] == 0 and args[2] == 2000
+                    for args, _ in mock_info.call_args_list
+                    if len(args) >= 3
+                )
+                assert found, "Expected cache miss log not found"
 
     @pytest.mark.asyncio
     async def test_get_response_handles_timeout(
