@@ -3,7 +3,7 @@ import base64
 import logging
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from telethon.errors import MessageTooLongError
@@ -321,6 +321,7 @@ class MockEvent:
         self.reply_to_msg_id: int | None = None
         self.raw_text: str = ""
         self.id: int = 999  # Added for rolling window logic
+        self.is_private: bool = False
 
     async def reply(self, message: str) -> None:
         self.replied_message = message
@@ -392,6 +393,70 @@ class TestHandleSaveCommand:
         # Should have at least started the process
         assert event.replied_message is not None
 
+    def test_save_command_private_uses_recent_history(
+        self, telegram_service: TelegramService
+    ) -> None:
+        """In private chat, /save reads from rolling window (chat_repository), not reply thread."""
+        cast(Any, telegram_service.neibot).capture_facts_from_history = AsyncMock(
+            return_value=2
+        )
+
+        cached_messages = [
+            {"message_id": 1, "payload": {"role": "user", "content": "hola", "attachments": []}},
+            {"message_id": 2, "payload": {"role": "assistant", "content": "hola!", "attachments": []}},
+        ]
+        get_recent_mock = MagicMock(return_value=cached_messages)
+        cast(Any, telegram_service.chat_repository).get_recent_messages = get_recent_mock
+
+        bot_get_messages_mock = AsyncMock(return_value=[])
+        telegram_service.bot = SimpleNamespace(
+            action=lambda chat_id, action: AsyncContextManager(),
+            get_messages=bot_get_messages_mock,
+        )
+
+        event = MockEvent()
+        event.sender_id = 123
+        event.chat_id = 456
+        event.reply_to_msg_id = None
+        event.raw_text = "/save"
+        event.is_private = True
+
+        asyncio.run(telegram_service._handle_save_command(event))
+
+        get_recent_mock.assert_called_once_with(456, 50)
+        bot_get_messages_mock.assert_not_called()
+
+    def test_save_command_group_uses_reply_history(
+        self, telegram_service: TelegramService
+    ) -> None:
+        """In group chat, /save reads from reply thread (bot.get_messages), not rolling window."""
+        cast(Any, telegram_service.neibot).capture_facts_from_history = AsyncMock(
+            return_value=1
+        )
+
+        get_recent_mock = MagicMock()
+        cast(Any, telegram_service.chat_repository).get_recent_messages = get_recent_mock
+        # get_message returns None so __build_reply_history falls through to bot.get_messages
+        cast(Any, telegram_service.chat_repository).get_message = MagicMock(return_value=None)
+
+        bot_get_messages_mock = AsyncMock(return_value=None)
+        telegram_service.bot = SimpleNamespace(
+            action=lambda chat_id, action: AsyncContextManager(),
+            get_messages=bot_get_messages_mock,
+        )
+
+        event = MockEvent()
+        event.sender_id = 123
+        event.chat_id = 456
+        event.reply_to_msg_id = 100  # non-None so the reply chain loop executes
+        event.raw_text = "/save"
+        event.is_private = False
+
+        asyncio.run(telegram_service._handle_save_command(event))
+
+        get_recent_mock.assert_not_called()
+        bot_get_messages_mock.assert_called()  # group path: bot.get_messages was invoked
+
 
 class TestHandleMemoryCommand:
     """Tests for the /memory command handler."""
@@ -431,7 +496,7 @@ class TestHandleMemoryCommand:
     def test_memory_command_with_memories(
         self, telegram_service: TelegramService
     ) -> None:
-        """Test /memory when user has memories."""
+        """Test /memory when user has memories (private chat)."""
         mock_memory_service = SimpleNamespace(
             get_all=lambda user_id: [
                 {"memory": "[TECH_STACK] Uses Python"},
@@ -443,12 +508,79 @@ class TestHandleMemoryCommand:
         event = MockEvent()
         event.sender_id = 123
         event.raw_text = "/memory"
+        event.is_private = True
 
         asyncio.run(telegram_service._handle_memory_command(event))
 
         assert event.replied_message is not None
         assert "Tu memoria en Yuno" in event.replied_message
         assert "Stack Técnico" in event.replied_message
+
+    def test_memory_command_private_replies_directly(
+        self, telegram_service: TelegramService
+    ) -> None:
+        """In private chat, memories are replied directly (not via DM)."""
+        mock_memory_service = SimpleNamespace(
+            get_all=lambda user_id: [{"memory": "[TECH_STACK] Uses Python"}],
+        )
+        cast(Any, telegram_service.neibot).memory_service = mock_memory_service
+
+        event = MockEvent()
+        event.sender_id = 123
+        event.raw_text = "/memory"
+        event.is_private = True
+
+        asyncio.run(telegram_service._handle_memory_command(event))
+
+        assert event.replied_message is not None
+        assert "Tu memoria en Yuno" in event.replied_message
+
+    def test_memory_command_group_sends_dm(
+        self, telegram_service: TelegramService
+    ) -> None:
+        """In group chat, memories are sent via DM and group gets a confirmation."""
+        mock_memory_service = SimpleNamespace(
+            get_all=lambda user_id: [{"memory": "[TECH_STACK] Uses Python"}],
+        )
+        cast(Any, telegram_service.neibot).memory_service = mock_memory_service
+
+        dm_send_mock = AsyncMock()
+        telegram_service.bot = SimpleNamespace(send_message=dm_send_mock)
+
+        event = MockEvent()
+        event.sender_id = 123
+        event.raw_text = "/memory"
+        event.is_private = False
+
+        asyncio.run(telegram_service._handle_memory_command(event))
+
+        dm_send_mock.assert_called_once()
+        sent_text = dm_send_mock.call_args[0][1]
+        assert "Tu memoria en Yuno" in sent_text
+        assert "por privado" in event.replied_message
+
+    def test_memory_command_group_dm_fails_shows_fallback(
+        self, telegram_service: TelegramService
+    ) -> None:
+        """If DM fails in a group, user gets an actionable fallback message."""
+        mock_memory_service = SimpleNamespace(
+            get_all=lambda user_id: [{"memory": "[TECH_STACK] Uses Python"}],
+        )
+        cast(Any, telegram_service.neibot).memory_service = mock_memory_service
+
+        telegram_service.bot = SimpleNamespace(
+            send_message=AsyncMock(side_effect=Exception("USER_BOT_INVALID"))
+        )
+
+        event = MockEvent()
+        event.sender_id = 123
+        event.raw_text = "/memory"
+        event.is_private = False
+
+        asyncio.run(telegram_service._handle_memory_command(event))
+
+        assert event.replied_message is not None
+        assert "Escríbeme primero por privado" in event.replied_message
 
     def test_memory_clear_command(self, telegram_service: TelegramService) -> None:
         """Test /memory clear command."""

@@ -742,9 +742,13 @@ class TelegramService(TelegramServiceInterface):
                 "Analizando la conversación para extraer datos importantes..."
             )
 
-            # 1. Fetch history
+            # 1. Fetch history — private chats use rolling window, groups use reply thread
             max_history = 50  # Analyze last 50 messages for context
-            history = await self.__build_reply_history(event, max_history)
+            is_private = await self._is_private_chat(event)
+            if is_private:
+                history = await self._build_recent_history(event, max_history)
+            else:
+                history = await self.__build_reply_history(event, max_history)
 
             # 2. Extract and save facts using Neibot
             user_id = str(event.sender_id)
@@ -852,4 +856,30 @@ class TelegramService(TelegramServiceInterface):
                 response_parts.extend(by_category[cat])
 
         response_parts.append("\n\n_Usa /memory clear para borrar todo._")
-        await event.reply("\n".join(response_parts))
+        response_text = "\n".join(response_parts)
+
+        is_private = await self._is_private_chat(event)
+        if is_private:
+            await event.reply(response_text)
+        else:
+            try:
+                await self.bot.send_message(event.sender_id, response_text)
+                await event.reply("Te envié tus memorias por privado.")
+            except MessageTooLongError:
+                notice = "\n\n[... lista truncada]"
+                truncated = response_text[:TELEGRAM_MESSAGE_LIMIT - len(notice)] + notice
+                try:
+                    await self.bot.send_message(event.sender_id, truncated)
+                    await event.reply("Te envié tus memorias por privado (lista truncada).")
+                except Exception as dm_err:
+                    self.logger.warning("Could not DM user %s after truncation: %s", user_id, dm_err)
+                    await event.reply(
+                        "No pude enviarte un DM. Escríbeme primero por privado "
+                        "y luego intenta /memory de nuevo aquí."
+                    )
+            except Exception as e:
+                self.logger.warning("Could not DM user %s: %s", user_id, e)
+                await event.reply(
+                    "No pude enviarte un DM. Escríbeme primero por privado "
+                    "y luego intenta /memory de nuevo aquí."
+                )
