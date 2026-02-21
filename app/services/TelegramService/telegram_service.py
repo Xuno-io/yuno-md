@@ -752,9 +752,24 @@ class TelegramService(TelegramServiceInterface):
 
             # 2. Extract and save facts using Neibot
             user_id = str(event.sender_id)
+            sender_name = ""
+            if not is_private:
+                sender = await event.get_sender()
+                sender_name = (
+                    getattr(sender, "username", None)
+                    or " ".join(
+                        part
+                        for part in [
+                            getattr(sender, "first_name", ""),
+                            getattr(sender, "last_name", ""),
+                        ]
+                        if part
+                    ).strip()
+                    or user_id
+                )
             async with self.bot.action(event.chat_id, "typing"):
                 saved_count = await self.neibot.capture_facts_from_history(
-                    history, user_id=user_id
+                    history, user_id=user_id, sender_name=sender_name
                 )
 
             # 3. Reply
@@ -867,12 +882,18 @@ class TelegramService(TelegramServiceInterface):
                 await event.reply("Te envié tus memorias por privado.")
             except MessageTooLongError:
                 notice = "\n\n[... lista truncada]"
-                truncated = response_text[:TELEGRAM_MESSAGE_LIMIT - len(notice)] + notice
+                truncated = (
+                    response_text[: TELEGRAM_MESSAGE_LIMIT - len(notice)] + notice
+                )
                 try:
                     await self.bot.send_message(event.sender_id, truncated)
-                    await event.reply("Te envié tus memorias por privado (lista truncada).")
+                    await event.reply(
+                        "Te envié tus memorias por privado (lista truncada)."
+                    )
                 except Exception as dm_err:
-                    self.logger.warning("Could not DM user %s after truncation: %s", user_id, dm_err)
+                    self.logger.warning(
+                        "Could not DM user %s after truncation: %s", user_id, dm_err
+                    )
                     await event.reply(
                         "No pude enviarte un DM. Escríbeme primero por privado "
                         "y luego intenta /memory de nuevo aquí."

@@ -38,6 +38,7 @@ class DummyNeibot(NeibotServiceInterface):
         self,
         history: list[MessagePayload],
         user_id: str,
+        sender_name: str = "",
     ) -> int:
         raise NotImplementedError
 
@@ -326,6 +327,9 @@ class MockEvent:
     async def reply(self, message: str) -> None:
         self.replied_message = message
 
+    async def get_sender(self) -> SimpleNamespace:
+        return SimpleNamespace(username="testuser", first_name="Test", last_name="User")
+
 
 def test_handle_help_command(telegram_service: TelegramService) -> None:
     event = MockEvent()
@@ -402,11 +406,19 @@ class TestHandleSaveCommand:
         )
 
         cached_messages = [
-            {"message_id": 1, "payload": {"role": "user", "content": "hola", "attachments": []}},
-            {"message_id": 2, "payload": {"role": "assistant", "content": "hola!", "attachments": []}},
+            {
+                "message_id": 1,
+                "payload": {"role": "user", "content": "hola", "attachments": []},
+            },
+            {
+                "message_id": 2,
+                "payload": {"role": "assistant", "content": "hola!", "attachments": []},
+            },
         ]
         get_recent_mock = MagicMock(return_value=cached_messages)
-        cast(Any, telegram_service.chat_repository).get_recent_messages = get_recent_mock
+        cast(
+            Any, telegram_service.chat_repository
+        ).get_recent_messages = get_recent_mock
 
         bot_get_messages_mock = AsyncMock(return_value=[])
         telegram_service.bot = SimpleNamespace(
@@ -435,9 +447,13 @@ class TestHandleSaveCommand:
         )
 
         get_recent_mock = MagicMock()
-        cast(Any, telegram_service.chat_repository).get_recent_messages = get_recent_mock
+        cast(
+            Any, telegram_service.chat_repository
+        ).get_recent_messages = get_recent_mock
         # get_message returns None so __build_reply_history falls through to bot.get_messages
-        cast(Any, telegram_service.chat_repository).get_message = MagicMock(return_value=None)
+        cast(Any, telegram_service.chat_repository).get_message = MagicMock(
+            return_value=None
+        )
 
         bot_get_messages_mock = AsyncMock(return_value=None)
         telegram_service.bot = SimpleNamespace(
@@ -557,6 +573,7 @@ class TestHandleMemoryCommand:
         dm_send_mock.assert_called_once()
         sent_text = dm_send_mock.call_args[0][1]
         assert "Tu memoria en Yuno" in sent_text
+        assert event.replied_message is not None
         assert "por privado" in event.replied_message
 
     def test_memory_command_group_dm_fails_shows_fallback(

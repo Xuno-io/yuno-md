@@ -38,6 +38,10 @@ Examples of valid facts:
 - "[BUSINESS_LOGIC] Maximum budget is 500 USD"
 - "[USER_CONSTRAINTS] Prefers automated triggers over manual commands"
 
+If the conversation involves multiple speakers (identified by [User: X] tags),
+extract facts ONLY about the target user specified in the [INSTRUCTION] tag.
+Do NOT extract facts about other participants.
+
 If the input is casual conversation with no strategic value, return: {"facts": []}
 Do NOT include greetings, emotions, or trivial preferences.
 """

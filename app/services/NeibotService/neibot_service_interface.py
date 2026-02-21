@@ -25,6 +25,7 @@ class NeibotServiceInterface(ABC):
         self,
         history: list[MessagePayload],
         user_id: str,
+        sender_name: str = "",
     ) -> int:
         """
         Analyze history, extract facts, and save them to the knowledge base.

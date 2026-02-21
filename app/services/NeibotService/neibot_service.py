@@ -23,7 +23,7 @@ from google.adk.agents import Agent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService, Session
 from google.adk.events import Event
-from langfuse import observe
+from langfuse import get_client, observe
 
 from app.utils.retry import genai_retry
 
@@ -148,7 +148,8 @@ class NeibotService(NeibotServiceInterface):
             session_service=self.session_service,
         )
         session = await self._create_session_with_history(
-            user_id=user_id, history=history,
+            user_id=user_id,
+            history=history,
         )
 
         final_response = ""
@@ -181,7 +182,9 @@ class NeibotService(NeibotServiceInterface):
     ) -> Any:
         """Call generate_content with retry on transient API errors (429, 502, 503)."""
         return await self.client.aio.models.generate_content(
-            model=model, contents=contents, config=config,
+            model=model,
+            contents=contents,
+            config=config,
         )
 
     def _create_search_memory_tool(self) -> Callable:
@@ -401,6 +404,10 @@ class NeibotService(NeibotServiceInterface):
             # Store user_id for tool access using contextvars
             token = _current_user_context.set(user_id)
 
+            # Attach user_id to the current Langfuse trace for observability
+            if user_id:
+                get_client().update_current_trace(user_id=user_id)
+
             # Use override model if provided
             current_model = model_name or self.model_name
             if current_model != self.model_name:
@@ -414,7 +421,9 @@ class NeibotService(NeibotServiceInterface):
             # Get the latest message to send
             last_message = history[-1]
             utc_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-            last_content = f"[Current time: {utc_time}] {last_message.get('content', '')}"
+            last_content = (
+                f"[Current time: {utc_time}] {last_message.get('content', '')}"
+            )
             attachments = last_message.get("attachments", [])
 
             # Build the new message content
@@ -465,21 +474,26 @@ class NeibotService(NeibotServiceInterface):
         self,
         history: list[MessagePayload],
         user_id: str,
+        sender_name: str = "",
     ) -> int:
         """
         Analyze conversation history and save memories using mem0.
 
         Returns the number of memories processed.
         """
+        # Attach user_id to the current Langfuse trace for observability
+        get_client().update_current_trace(user_id=user_id)
+
         if not self.memory_service:
             self.logger.warning("No memory service available.")
             return 0
-        return await self._capture_with_mem0(history, user_id)
+        return await self._capture_with_mem0(history, user_id, sender_name)
 
     async def _capture_with_mem0(
         self,
         history: list[MessagePayload],
         user_id: str,
+        sender_name: str = "",
     ) -> int:
         """
         Capture memories using mem0 (new system).
@@ -498,6 +512,18 @@ class NeibotService(NeibotServiceInterface):
 
             if not conversation_text.strip():
                 return 0
+
+            # Scope fact extraction to the target user in multi-user conversations
+            if sender_name:
+                # Sanitize user content to prevent instruction injection
+                conversation_text = conversation_text.replace(
+                    "[INSTRUCTION", "[_INSTRUCTION"
+                )
+                conversation_text += (
+                    f"\n[INSTRUCTION: This is a multi-user conversation. "
+                    f"Extract facts ONLY about the user identified as "
+                    f"'{sender_name}'. Ignore facts about other participants.]\n"
+                )
 
             if self.memory_service is None:
                 return 0
