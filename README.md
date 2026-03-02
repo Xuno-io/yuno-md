@@ -208,7 +208,7 @@ telegram-bot-adapter/
 │   ├── services/           # Business logic
 │   │   ├── MemoryService/  # Long-term memory (mem0)
 │   │   ├── NeibotService/  # AI agent (ADK)
-│   │   └── TelegramService/# Telegram integration
+│   │   └── TelegramService/ # Telegram integration
 │   └── tools/              # Agent tools
 ├── configuration/          # JSON configuration files
 ├── docs/                   # Documentation

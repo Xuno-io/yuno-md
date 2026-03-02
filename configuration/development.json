@@ -6,6 +6,6 @@
     "VERTEX_LOCATION": "global",
     "MODEL_NAME": "gemini-3-flash-preview",
     "SQLITE_DB_PATH": "neibot_database.sqlite",
-    "COMMAND_PREFIX": "/xuno",
+    "COMMAND_PREFIX": "/yuno",
     "CACHE_TOKEN_THRESHOLD": 2048
 }
