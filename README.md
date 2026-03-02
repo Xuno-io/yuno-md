@@ -203,13 +203,12 @@ telegram-bot-adapter/
 │   ├── bootstrap/          # Application bootstrapping
 │   ├── components/         # Infrastructure components
 │   ├── dependencies/       # Dependency injection configuration
-│   ├── entities/           # Domain entities (Message, User)
+│   ├── entities/           # Domain entities (Message)
 │   ├── repositories/       # Data access layer
 │   ├── services/           # Business logic
 │   │   ├── MemoryService/  # Long-term memory (mem0)
 │   │   ├── NeibotService/  # AI agent (ADK)
-│   │   ├── TelegramService/# Telegram integration
-│   │   └── UserService/    # User management
+│   │   └── TelegramService/ # Telegram integration
 │   └── tools/              # Agent tools
 ├── configuration/          # JSON configuration files
 ├── docs/                   # Documentation

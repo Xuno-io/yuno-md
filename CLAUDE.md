@@ -60,17 +60,16 @@ main.py → bootstrap_bot() → Components (Lagom DI) → Services
 
 ### Service Layer
 
-- **TelegramService** (`app/services/TelegramService/`) — Telethon event handlers, message routing, history management, Free/Pro user gating. Private chats use rolling window; group chats use thread-based replies triggered by `/yuno` or `@yunoaidotcom`.
+- **TelegramService** (`app/services/TelegramService/`) — Telethon event handlers, message routing, history management. Private chats use rolling window; group chats use thread-based replies triggered by `/yuno` or `@yunoaidotcom`.
 - **NeibotService** (`app/services/NeibotService/`) — Google ADK Agent with in-memory sessions. Creates tool functions (search_memory, web_search, MCP toolsets) via closures. Handles response distillation when exceeding Telegram's 4096 char limit. Optional Langfuse tracing via `@observe`.
 - **MemoryService** (`app/services/MemoryService/`) — Wraps mem0 with Redis backend. Semantic search with categories: `[TECH_STACK]`, `[BUSINESS_LOGIC]`, `[USER_CONSTRAINTS]`. Fact extraction via separate Gemini call.
-- **UserService** (`app/services/UserService/`) — User tier management (Free/Pro), returns appropriate model and history limits per tier.
 - **McpManager** (`app/services/McpService/`) — Loads MCP server configs from JSON, supports Stdio and SSE connections, resolves `${ENV_VAR}` placeholders.
 
 ### Data Layer
 
-- **Repositories** (`app/repositories/`) — `ChatRepository` for SQLite message history/model selection; `UserRepository` for Pro tier status.
+- **Repositories** (`app/repositories/`) — `ChatRepository` for SQLite message history/model selection.
 - **Database** (`app/components/database/`) — SQLite wrapper from xuno-components.
-- **Entities** (`app/entities/`) — `MessagePayload`, `ImageAttachment`, `User` TypedDict.
+- **Entities** (`app/entities/`) — `MessagePayload`, `ImageAttachment` TypedDict.
 
 ### Dependency Injection
 
@@ -80,7 +79,7 @@ Uses **Lagom** DI container. `Components` class (`app/bootstrap/components.py`) 
 
 - **Context variables**: `contextvars.ContextVar` for thread-safe user_id tracking across async operations
 - **Closures**: Tool functions (search_memory, web_search) capture service instances via closures rather than class methods
-- **Rolling window**: Last 20 messages sent to LLM (`MAX_HISTORY_TURNS_PRO`); Free users capped at 50 total turns (`MAX_HISTORY_TURNS`)
+- **Rolling window**: Last 20 messages sent to LLM for context
 - **Distillation**: Responses > 4096 chars are condensed via a separate model call using a 4-movement protocol
 
 ## Configuration

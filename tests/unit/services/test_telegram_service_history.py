@@ -21,16 +21,12 @@ def mock_client():
 
 @pytest.fixture
 def telegram_service(mock_chat_repo, mock_client):
-    user_service = MagicMock()
-    user_service.get_user_max_history_turns.return_value = 100
-    user_service.is_user_pro.return_value = False
     service = TelegramService(
         command_prefix="/cmd",
         neibot=AsyncMock(),
         telegram_client=mock_client,
         logger=MagicMock(),
         chat_repository=mock_chat_repo,
-        user_service=user_service,
         admin_ids=[123],
     )
     service.me = MagicMock()
