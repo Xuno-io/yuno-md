@@ -14,7 +14,6 @@ from app.services.NeibotService.neibot_service_interface import NeibotServiceInt
 from app.services.TelegramService.telegram_service_interface import (
     TelegramServiceInterface,
 )
-from app.services.UserService.user_service_interface import UserServiceInterface
 from app.repositories.chat_repository.chat_repository_interface import (
     ChatRepositoryInterface,
 )
@@ -53,7 +52,6 @@ class TelegramService(TelegramServiceInterface):
         telegram_client: TelegramClient,
         logger: logging.Logger,
         chat_repository: ChatRepositoryInterface,
-        user_service: UserServiceInterface,
         admin_ids: list[int],
     ) -> None:
         self.logger: logging.Logger = logger
@@ -62,7 +60,6 @@ class TelegramService(TelegramServiceInterface):
         self.me: Any | None = None
         self.command_prefix: str = command_prefix.lower()  # Normalize to lowercase
         self.chat_repository = chat_repository
-        self.user_service = user_service
         self.admin_ids = admin_ids
 
         self.logger.info(
@@ -78,7 +75,6 @@ class TelegramService(TelegramServiceInterface):
         telegram_client: TelegramClient,
         logger: logging.Logger,
         chat_repository: ChatRepositoryInterface,
-        user_service: UserServiceInterface,
         admin_ids: list[int],
     ) -> TelegramService:
         """Factory to perform async setup steps before returning the service."""
@@ -88,7 +84,6 @@ class TelegramService(TelegramServiceInterface):
             telegram_client=telegram_client,
             logger=logger,
             chat_repository=chat_repository,
-            user_service=user_service,
             admin_ids=admin_ids,
         )
         service.bot.add_event_handler(service._my_event_handler, events.NewMessage)
@@ -157,40 +152,16 @@ class TelegramService(TelegramServiceInterface):
 
         metadata: str = await self.__build_metadata(event)
 
-        is_pro = self.user_service.is_user_pro(event.sender_id)
-        max_history_turns = self.user_service.get_user_max_history_turns(
-            event.sender_id
-        )
-
         # Rolling Window: Only the last 20 messages are sent to the LLM.
         ROLLING_WINDOW_SIZE = 20
-
-        # For Pro users, we only need to fetch the window size.
-        # For Free users, we fetch up to the limit to enforce the wall.
-        fetch_limit = ROLLING_WINDOW_SIZE if is_pro else max_history_turns
 
         is_private = await self._is_private_chat(event)
 
         if is_private:
-            # Private Chat: Always use Rolling Window (last N messages)
-            # No hard limits, just smooth context sliding.
             history = await self._build_recent_history(event, ROLLING_WINDOW_SIZE)
         else:
-            # Group Chat: Explicit threads via replies
-            history = await self.__build_reply_history(event, fetch_limit)
+            history = await self.__build_reply_history(event, ROLLING_WINDOW_SIZE)
 
-        if not is_private and not is_pro and len(history) >= max_history_turns:
-            self.logger.warning(
-                "Conversation history limit reached (%s). Rejecting request.",
-                max_history_turns,
-            )
-
-            await event.reply(
-                message=f"La conversación ha alcanzado el límite de {max_history_turns} mensajes. Por favor, inicia un nuevo hilo o discusión con el comando {self.command_prefix} para continuar.",
-            )
-            return
-
-        # Apply rolling window slice for context
         context = history[-ROLLING_WINDOW_SIZE:]
 
         context_texts, history_attachments = self._extract_referenced_messages(context)
@@ -225,12 +196,9 @@ class TelegramService(TelegramServiceInterface):
             len(context),
         )
 
-        # Determine model to use based on user tier
-        model_name = self.user_service.get_user_model(event.sender_id)
-
         async with self.bot.action(event.chat_id, "typing"):
             response: str = await self.neibot.get_response(
-                context, model_name=model_name, user_id=str(event.sender_id)
+                context, user_id=str(event.sender_id)
             )
 
         sent_msg = None

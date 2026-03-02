@@ -12,9 +12,7 @@ from app.services.TelegramService.telegram_service import TelegramService
 from app.services.TelegramService.telegram_service_interface import (
     TelegramServiceInterface,
 )
-from app.services.UserService.user_service import UserService
-from app.services.UserService.user_service_interface import UserServiceInterface
-from app.dependencies.repositories import get_chat_repository, get_user_repository
+from app.dependencies.repositories import get_chat_repository
 from telethon import TelegramClient
 from xuno_components.configuration.configuration_interface import ConfigurationInterface
 from xuno_components.logger.logger_interface import LoggerInterface
@@ -149,29 +147,6 @@ def get_memory_service(components: Components) -> MemoryServiceInterface:
     )
 
 
-def get_user_service(components: Components) -> UserServiceInterface:
-    configuration = components.get_component(ConfigurationInterface)
-    default_max_history_turns = configuration.get_configuration(
-        "MAX_HISTORY_TURNS", int, default=100
-    )
-    pro_max_history_turns = configuration.get_configuration(
-        "MAX_HISTORY_TURNS_PRO", int, default=200
-    )
-    default_model_name = configuration.get_configuration(
-        "MODEL_NAME", str, default="gemini-3-flash-preview"
-    )
-    pro_model_name = configuration.get_configuration(
-        "MODEL_NAME_PRO", str, default="gemini-3-pro-preview"
-    )
-    return UserService(
-        user_repository=get_user_repository(components),
-        default_max_history_turns=default_max_history_turns,
-        pro_max_history_turns=pro_max_history_turns,
-        default_model_name=default_model_name,
-        pro_model_name=pro_model_name,
-    )
-
-
 async def get_telegram_service(
     components: Components, neibot_service: NeibotServiceInterface
 ) -> TelegramServiceInterface:
@@ -192,6 +167,5 @@ async def get_telegram_service(
         telegram_client=components.get_component(TelegramClient),
         logger=components.get_component(LoggerInterface).get_logger("TelegramService"),
         chat_repository=get_chat_repository(components),
-        user_service=get_user_service(components),
         admin_ids=admin_ids,
     )

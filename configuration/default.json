@@ -5,12 +5,9 @@
     "REDIS_PORT": 6379,
     "VERTEX_LOCATION": "global",
     "MODEL_NAME": "gemini-3-flash-preview",
-    "MODEL_NAME_PRO": "gemini-3-pro-preview",
     "SYSTEM_PROMPT": "Eres YunoAI siendo ejecutada en Telegram. El username de tu creador es {CREATOR_USERNAME}. Responde conciso",
     "SQLITE_DB_PATH": "neibot_database.sqlite",
-    "MAX_HISTORY_TURNS": 50,
-    "MAX_HISTORY_TURNS_PRO": 20,
-    "COMMAND_PREFIX": "/yuno",
+    "COMMAND_PREFIX": "/xuno",
     "CACHE_TOKEN_THRESHOLD": 2048,
     "DISTILL_MODEL_NAME": "gemini-2.5-pro",
     "MCP_SERVERS_CONFIG": "configuration/mcp_servers.json"

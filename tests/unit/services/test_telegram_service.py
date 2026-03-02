@@ -20,7 +20,6 @@ from app.services.TelegramService.telegram_service import (
 from app.repositories.chat_repository.chat_repository_interface import (
     ChatRepositoryInterface,
 )
-from app.services.UserService.user_service_interface import UserServiceInterface
 
 
 class DummyNeibot(NeibotServiceInterface):
@@ -93,22 +92,12 @@ def telegram_service() -> TelegramService:
             set_model=lambda chat_id, model: None,
         ),
     )
-    user_service = cast(
-        UserServiceInterface,
-        SimpleNamespace(
-            get_user_max_history_turns=lambda user_id: 100,
-            set_user_pro_status=lambda user_id, is_pro: None,
-            is_user_pro=lambda user_id: False,
-            get_user_model=lambda user_id: "gemini-3-flash-preview",
-        ),
-    )
     return TelegramService(
         command_prefix="/cmd",
         neibot=DummyNeibot(),
         telegram_client=SimpleNamespace(),
         logger=logging.getLogger("TelegramServiceTest"),
         chat_repository=chat_repo,
-        user_service=user_service,
         admin_ids=[123],
     )
 

@@ -30,7 +30,6 @@ async def telegram_service(mock_neibot, mock_client):
         telegram_client=mock_client,
         logger=MagicMock(),
         chat_repository=mock_chat_repo,
-        user_service=MagicMock(),
         admin_ids=[999],
     )
     # Don't call start() - it blocks on run_until_disconnected()
@@ -178,7 +177,6 @@ async def test_build_recent_history_filtered_cache_empty_falls_back_to_api(
         telegram_client=mock_client,
         logger=mock_logger,
         chat_repository=mock_chat_repo,
-        user_service=MagicMock(),
         admin_ids=[999],
     )
     # Don't call start() - it blocks on run_until_disconnected()
@@ -264,11 +262,6 @@ async def test_cache_saves_only_current_attachments_not_merged_history(
     ]
     mock_chat_repo.save_message = MagicMock()
 
-    mock_user_service = MagicMock()
-    mock_user_service.is_user_pro.return_value = True
-    mock_user_service.get_user_max_history_turns.return_value = 20
-    mock_user_service.get_user_model.return_value = "default-model"
-
     mock_logger = MagicMock()
 
     service = TelegramService(
@@ -277,7 +270,6 @@ async def test_cache_saves_only_current_attachments_not_merged_history(
         telegram_client=mock_client,
         logger=mock_logger,
         chat_repository=mock_chat_repo,
-        user_service=mock_user_service,
         admin_ids=[999],
     )
     # Don't call start() - it blocks on run_until_disconnected()
