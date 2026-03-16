@@ -30,6 +30,8 @@ from app.utils.retry import genai_retry
 from app.entities.message import MessagePayload
 from app.services.NeibotService.neibot_service_interface import NeibotServiceInterface
 from app.services.MemoryService.memory_service_interface import MemoryServiceInterface
+from app.services.FrictionService.friction_engine import FrictionEngine
+from app.services.FrictionService.friction_fallback import FrictionFallbackGenerator
 from app.tools.web_search_tool import web_search
 
 if TYPE_CHECKING:
@@ -39,6 +41,21 @@ if TYPE_CHECKING:
 # Context variable for thread-safe user context access
 _current_user_context: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "current_user_id", default=None
+)
+
+# Context variables for the FrictionEngine "Tool as Output" pattern.
+#
+# IMPORTANT: _friction_captured_response holds a MUTABLE DICT (not a plain value).
+# asyncio copies ContextVar values (by reference) into child Tasks — so immutable
+# values set() in a child Task are invisible to the parent.  A shared mutable dict
+# is mutated in-place by the tool, making the change visible to the parent Task
+# that created the dict.  _friction_required_level is read-only after being set, so
+# a plain int is fine there.
+_friction_captured_response: contextvars.ContextVar[dict | None] = (
+    contextvars.ContextVar("friction_captured_response", default=None)
+)
+_friction_required_level: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "friction_required_level", default=2
 )
 
 # Default distillation prompt in case the file is not found
@@ -81,6 +98,8 @@ class NeibotService(NeibotServiceInterface):
         extraction_model_name: str | None = None,
         distill_model_name: str | None = None,
         mcp_toolsets: list[Any] | None = None,
+        friction_engine: FrictionEngine | None = None,
+        friction_fallback: FrictionFallbackGenerator | None = None,
     ) -> None:
         """
         Initialize the service with Google ADK configuration.
@@ -98,6 +117,8 @@ class NeibotService(NeibotServiceInterface):
             extraction_model_name: Model for fact extraction (defaults to gemini-3-flash-preview)
             distill_model_name: Model for response distillation when messages are too long
             mcp_toolsets: Optional list of MCPToolset instances from configured MCP servers
+            friction_engine: Optional FrictionEngine for calculating required friction levels
+            friction_fallback: Optional FrictionFallbackGenerator for deterministic fallbacks
         """
         self.system_prompt = system_prompt
         self.model_name = model_name
@@ -111,6 +132,12 @@ class NeibotService(NeibotServiceInterface):
         self.extraction_model_name = extraction_model_name or "gemini-3-flash-preview"
         self.distill_model_name = distill_model_name or "gemini-2.5-pro"
         self.mcp_toolsets = mcp_toolsets or []
+        self.friction_engine = friction_engine
+        self.friction_fallback = (
+            friction_fallback
+            if friction_fallback is not None
+            else (FrictionFallbackGenerator() if friction_engine is not None else None)
+        )
 
         # Load the distillation prompt from file
         self.distill_prompt = self._load_distill_prompt()
@@ -263,6 +290,72 @@ class NeibotService(NeibotServiceInterface):
 
         return search_memory
 
+    def _create_emit_friction_response_tool(self) -> Callable:
+        """
+        Create the emit_friction_response tool — the ONLY valid output channel
+        when the FrictionEngine is active.
+
+        The LLM must call this tool to emit any response. Python intercepts the
+        typed parameters and validates the friction level. ADK automatically
+        loops the model when the tool returns a FrictionViolationError string.
+        """
+
+        def emit_friction_response(
+            friction_level: int,
+            friction_justification: str,
+            core_argument: str,
+            weak_point_exposed: str,
+            raw_response: str,
+        ) -> str:
+            """
+            Único canal válido para emitir una respuesta al usuario.
+
+            DEBES llamar esta herramienta para enviar tu respuesta. NO escribas
+            texto libre como respuesta final.
+
+            Args:
+                friction_level: Nivel de fricción aplicado (0=VALIDACION,
+                    1=ANALISIS, 2=DESAFIO, 3=ANIQUILACION).
+                friction_justification: Por qué elegiste este nivel de fricción.
+                core_argument: Argumento central identificado en el mensaje del usuario.
+                weak_point_exposed: Punto débil expuesto (obligatorio si friction_level >= 2).
+                raw_response: Tu respuesta completa para enviar al usuario.
+
+            Returns:
+                "OK" si la respuesta es válida, o un mensaje de error para que
+                corrijas y vuelvas a llamar la herramienta.
+            """
+            required = _friction_required_level.get()
+
+            if friction_level < 0 or friction_level > 3:
+                return (
+                    f"FrictionViolationError: friction_level={friction_level} fuera de rango (0-3). "
+                    "Usa 0=VALIDACION, 1=ANALISIS, 2=DESAFIO, 3=ANIQUILACION y vuelve a llamar."
+                )
+
+            if friction_level < required:
+                return (
+                    f"FrictionViolationError: friction_level={friction_level} es menor "
+                    f"que el mínimo requerido={required}. "
+                    f"Aumenta friction_level a {required} o superior y vuelve a llamar."
+                )
+
+            if friction_level >= 2 and not weak_point_exposed.strip():
+                return (
+                    "FrictionViolationError: weak_point_exposed está vacío pero "
+                    f"friction_level={friction_level} >= 2. "
+                    "Identifica el punto débil del argumento del usuario y vuelve a llamar."
+                )
+
+            # Mutate the shared dict in-place so the parent asyncio Task sees it.
+            # (set() on a ContextVar only affects the current Task's copy of the context.)
+            holder = _friction_captured_response.get()
+            if holder is not None:
+                holder["response"] = raw_response
+            return "OK"
+
+        return emit_friction_response
+
     def _get_or_create_agent(self, model_name: str) -> Agent:
         """Return a cached Agent for the given model, creating one if needed."""
         if model_name not in self._agents:
@@ -290,6 +383,10 @@ class NeibotService(NeibotServiceInterface):
         # exposes the remote server's tools to the ADK agent transparently)
         if self.mcp_toolsets:
             tools.extend(self.mcp_toolsets)
+
+        # Add friction output tool when FrictionEngine is active
+        if self.friction_engine:
+            tools.append(self._create_emit_friction_response_tool())
 
         return Agent(
             model=model_name,
@@ -396,6 +493,9 @@ class NeibotService(NeibotServiceInterface):
             The assistant's response
         """
         token = None
+        token_friction_response = None
+        token_friction_level = None
+        constraints = None
         try:
             if not history:
                 self.logger.warning("Empty history provided")
@@ -421,9 +521,37 @@ class NeibotService(NeibotServiceInterface):
             # Get the latest message to send
             last_message = history[-1]
             utc_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-            last_content = (
-                f"[Current time: {utc_time}] {last_message.get('content', '')}"
-            )
+
+            # Calculate friction and inject level hint into user message
+            if self.friction_engine:
+                constraints = self.friction_engine.calculate_required_friction(
+                    user_message=last_message.get("content", ""),
+                    history=history[:-1],
+                )
+                token_friction_level = _friction_required_level.set(
+                    constraints.required_min.value
+                )
+                # Use a mutable dict as the holder so child Tasks (ADK tool runner)
+                # can write to it and the mutation is visible here.
+                token_friction_response = _friction_captured_response.set(
+                    {"response": None}
+                )
+                friction_prefix = (
+                    f"\n[SISTEMA: friction_level mínimo requerido = "
+                    f"{constraints.required_min.value}. "
+                    f"Llama emit_friction_response con friction_level >= "
+                    f"{constraints.required_min.value}]\n"
+                )
+                last_content = (
+                    f"[Current time: {utc_time}] "
+                    f"{last_message.get('content', '')}"
+                    f"{friction_prefix}"
+                )
+            else:
+                last_content = (
+                    f"[Current time: {utc_time}] {last_message.get('content', '')}"
+                )
+
             attachments = last_message.get("attachments", [])
 
             # Build the new message content
@@ -456,6 +584,26 @@ class NeibotService(NeibotServiceInterface):
                 self.logger.error("ADK runner execution timed out")
                 return "I apologize, but this request is taking longer than expected. Please try again."
 
+            # Check if emit_friction_response was called
+            if self.friction_engine:
+                holder = _friction_captured_response.get()
+                captured = holder.get("response") if holder else None
+                if captured is not None:
+                    # Tool was called and validated — use the captured response
+                    return captured
+                else:
+                    # Tool was NOT called — LLM disobeyed the protocol
+                    self.logger.warning(
+                        "emit_friction_response not called — using deterministic fallback"
+                    )
+                    if self.friction_fallback is None or constraints is None:
+                        return "Error: configuración de fricción incompleta."
+                    return self.friction_fallback.generate(
+                        user_message=last_message.get("content", ""),
+                        constraints=constraints,
+                        violation_reason="tool_not_called",
+                    )
+
             if not final_response:
                 self.logger.warning("ADK returned empty response")
                 return ""
@@ -468,6 +616,10 @@ class NeibotService(NeibotServiceInterface):
         finally:
             if token:
                 _current_user_context.reset(token)
+            if token_friction_response:
+                _friction_captured_response.reset(token_friction_response)
+            if token_friction_level:
+                _friction_required_level.reset(token_friction_level)
 
     @observe()
     async def capture_facts_from_history(

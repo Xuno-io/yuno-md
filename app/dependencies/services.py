@@ -8,6 +8,8 @@ from app.services.NeibotService.neibot_service import NeibotService
 from app.services.MemoryService.memory_service_interface import MemoryServiceInterface
 from app.services.MemoryService.memory_service import MemoryService
 from app.services.McpService.mcp_manager import McpManager
+from app.services.FrictionService.friction_engine import FrictionEngine
+from app.services.FrictionService.friction_fallback import FrictionFallbackGenerator
 from app.services.TelegramService.telegram_service import TelegramService
 from app.services.TelegramService.telegram_service_interface import (
     TelegramServiceInterface,
@@ -90,6 +92,8 @@ def get_neibot_service(components: Components) -> NeibotServiceInterface:
         extraction_model_name=extraction_model,
         distill_model_name=distill_model,
         mcp_toolsets=mcp_toolsets,
+        friction_engine=FrictionEngine(),
+        friction_fallback=FrictionFallbackGenerator(),
     )
 
 

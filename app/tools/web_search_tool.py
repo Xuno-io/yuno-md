@@ -57,11 +57,16 @@ def _get_client() -> Client:
 
 @genai_retry
 async def _generate_search_with_retry(
-    client: Client, model: str, contents: list, config: types.GenerateContentConfig,
+    client: Client,
+    model: str,
+    contents: list,
+    config: types.GenerateContentConfig,
 ) -> Any:
     """Call generate_content for search with retry on transient API errors (429, 502, 503)."""
     return await client.aio.models.generate_content(
-        model=model, contents=contents, config=config,
+        model=model,
+        contents=contents,
+        config=config,
     )
 
 

@@ -144,9 +144,7 @@ class McpManager:
             raw = path.read_text(encoding="utf-8")
             return json.loads(raw)
         except (json.JSONDecodeError, OSError) as exc:
-            self.logger.error(
-                "Failed to read MCP config %s: %s", self.config_path, exc
-            )
+            self.logger.error("Failed to read MCP config %s: %s", self.config_path, exc)
             return None
 
     def _build_toolset(self, cfg: dict[str, Any]) -> MCPToolset:

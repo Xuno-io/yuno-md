@@ -95,25 +95,19 @@ class TestConfigLoading:
         manager = McpManager(config_path="/nonexistent/path.json", logger=logger)
         assert manager.get_toolsets() == []
 
-    def test_invalid_json(
-        self, tmp_config: Path, logger: logging.Logger
-    ) -> None:
+    def test_invalid_json(self, tmp_config: Path, logger: logging.Logger) -> None:
         """Manager should handle malformed JSON gracefully."""
         tmp_config.write_text("{invalid json", encoding="utf-8")
         manager = McpManager(config_path=str(tmp_config), logger=logger)
         assert manager.get_toolsets() == []
 
-    def test_empty_servers_list(
-        self, tmp_config: Path, logger: logging.Logger
-    ) -> None:
+    def test_empty_servers_list(self, tmp_config: Path, logger: logging.Logger) -> None:
         """An empty servers list should result in zero toolsets."""
         config_path = _write_config(tmp_config, {"servers": []})
         manager = McpManager(config_path=config_path, logger=logger)
         assert manager.get_toolsets() == []
 
-    def test_no_servers_key(
-        self, tmp_config: Path, logger: logging.Logger
-    ) -> None:
+    def test_no_servers_key(self, tmp_config: Path, logger: logging.Logger) -> None:
         """A config without 'servers' key should result in zero toolsets."""
         config_path = _write_config(tmp_config, {"version": 1})
         manager = McpManager(config_path=config_path, logger=logger)
@@ -196,7 +190,11 @@ class TestStdioToolset:
                         "enabled": True,
                         "type": "stdio",
                         "command": "npx",
-                        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+                        "args": [
+                            "-y",
+                            "@modelcontextprotocol/server-filesystem",
+                            "/tmp",
+                        ],
                         "env": {"KEY": "val"},
                     }
                 ]
@@ -284,7 +282,11 @@ class TestStdioToolset:
                         "enabled": True,
                         "type": "stdio",
                         "command": "npx",
-                        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+                        "args": [
+                            "-y",
+                            "@modelcontextprotocol/server-filesystem",
+                            "/tmp",
+                        ],
                         "tool_filter": ["list_directory", "read_file"],
                     }
                 ]
