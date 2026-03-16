@@ -116,7 +116,9 @@ class FrictionEngine:
         de similitud de palabras en al menos 2 mensajes previos (últimos 5).
         """
         user_messages = [
-            m.get("content", "") for m in history[-5:] if m.get("role") == "user"
+            self._strip_group_prefix(m.get("content", ""))
+            for m in history[-5:]
+            if m.get("role") == "user"
         ]
         if not user_messages:
             return False

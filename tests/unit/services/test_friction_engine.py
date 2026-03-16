@@ -126,6 +126,28 @@ class TestDetectRepetition:
         # Only 1 similar message (not 2) → no repetition
         assert result.is_repeating is False
 
+    def test_group_prefix_stripped_in_repetition(self, engine: FrictionEngine) -> None:
+        """Group prefixes should be stripped before similarity comparison."""
+        history: list[MessagePayload] = [
+            {
+                "role": "user",
+                "content": "[Group: dev][User: alice]: necesito financiación urgente",
+                "attachments": [],
+            },
+            {"role": "assistant", "content": "respuesta", "attachments": []},
+            {
+                "role": "user",
+                "content": "[Group: dev][User: alice]: necesito financiación urgente ya",
+                "attachments": [],
+            },
+            {"role": "assistant", "content": "respuesta", "attachments": []},
+        ]
+        result = engine.calculate_required_friction(
+            "[Group: dev][User: alice]: necesito financiación urgente", history
+        )
+        assert result.required_min == FrictionLevel.ANIQUILACION
+        assert result.is_repeating is True
+
     def test_only_user_messages_count(self, engine: FrictionEngine) -> None:
         # Assistant messages should NOT count toward repetition
         history: list[MessagePayload] = [
