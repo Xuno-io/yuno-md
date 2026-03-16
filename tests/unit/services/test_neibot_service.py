@@ -9,6 +9,8 @@ import logging
 from app.services.NeibotService.neibot_service import (
     NeibotService,
     _current_user_context,
+    _friction_captured_response,
+    _friction_required_level,
 )
 from typing import cast
 from unittest.mock import AsyncMock, patch, MagicMock, Mock
@@ -1004,3 +1006,403 @@ class TestDistillResponse:
 
         assert "EL ESTRATO" in prompt or "CUATRO movimientos" in prompt
         mock_warning.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# FrictionEngine integration tests
+# ---------------------------------------------------------------------------
+
+
+def _make_neibot_with_friction(logger: logging.Logger) -> NeibotService:
+    """Create a NeibotService with real FrictionEngine and FallbackGenerator."""
+    from app.services.FrictionService.friction_engine import FrictionEngine
+    from app.services.FrictionService.friction_fallback import FrictionFallbackGenerator
+
+    with patch("app.services.NeibotService.neibot_service.genai.Client"):
+        with patch(
+            "app.services.NeibotService.neibot_service.InMemorySessionService"
+        ) as MockSS:
+            mock_ss = MockSS.return_value
+            mock_ss.create_session = AsyncMock()
+            mock_ss.append_event = AsyncMock()
+
+            return NeibotService(
+                system_prompt="Test.",
+                model_name="gemini-pro",
+                location="us-central1",
+                project_id="test",
+                temperature=0.7,
+                max_tokens=1000,
+                logger=logger,
+                friction_engine=FrictionEngine(),
+                friction_fallback=FrictionFallbackGenerator(),
+            )
+
+
+class TestEmitFrictionResponseTool:
+    """Tests for the emit_friction_response tool closure."""
+
+    def test_valid_call_captures_response(self, logger: logging.Logger) -> None:
+        """Tool with valid params writes to the mutable holder dict."""
+        service = _make_neibot_with_friction(logger)
+        tool = service._create_emit_friction_response_tool()
+
+        holder: dict = {"response": None}
+        token_level = _friction_required_level.set(2)
+        token_resp = _friction_captured_response.set(holder)
+        try:
+            result = tool(
+                friction_level=2,
+                friction_justification="Argumento concreto",
+                core_argument="El usuario plantea una duda técnica",
+                weak_point_exposed="No especifica el contexto de rendimiento",
+                raw_response="Mi respuesta completa aquí",
+            )
+            assert result == "OK"
+            assert holder["response"] == "Mi respuesta completa aquí"
+        finally:
+            _friction_required_level.reset(token_level)
+            _friction_captured_response.reset(token_resp)
+
+    def test_friction_level_below_required_returns_violation(
+        self, logger: logging.Logger
+    ) -> None:
+        """Tool returns FrictionViolationError when level < required."""
+        service = _make_neibot_with_friction(logger)
+        tool = service._create_emit_friction_response_tool()
+
+        holder: dict = {"response": None}
+        token_level = _friction_required_level.set(3)
+        token_resp = _friction_captured_response.set(holder)
+        try:
+            result = tool(
+                friction_level=1,
+                friction_justification="Justificación insuficiente",
+                core_argument="algo",
+                weak_point_exposed="",
+                raw_response="respuesta",
+            )
+            assert "FrictionViolationError" in result
+            assert "mínimo requerido=3" in result
+            # Response should NOT have been captured
+            assert holder["response"] is None
+        finally:
+            _friction_required_level.reset(token_level)
+            _friction_captured_response.reset(token_resp)
+
+    def test_empty_weak_point_with_level_gte_2_returns_violation(
+        self, logger: logging.Logger
+    ) -> None:
+        """Tool returns FrictionViolationError when friction_level >= 2 and weak_point_exposed is empty."""
+        service = _make_neibot_with_friction(logger)
+        tool = service._create_emit_friction_response_tool()
+
+        holder: dict = {"response": None}
+        token_level = _friction_required_level.set(2)
+        token_resp = _friction_captured_response.set(holder)
+        try:
+            result = tool(
+                friction_level=2,
+                friction_justification="Justificación",
+                core_argument="El usuario pregunta algo",
+                weak_point_exposed="",  # Empty!
+                raw_response="respuesta",
+            )
+            assert "FrictionViolationError" in result
+            assert "weak_point_exposed" in result
+            assert holder["response"] is None
+        finally:
+            _friction_required_level.reset(token_level)
+            _friction_captured_response.reset(token_resp)
+
+    def test_level_zero_does_not_require_weak_point(
+        self, logger: logging.Logger
+    ) -> None:
+        """friction_level=0 (VALIDACION) does not require weak_point_exposed."""
+        service = _make_neibot_with_friction(logger)
+        tool = service._create_emit_friction_response_tool()
+
+        holder: dict = {"response": None}
+        token_level = _friction_required_level.set(0)
+        token_resp = _friction_captured_response.set(holder)
+        try:
+            result = tool(
+                friction_level=0,
+                friction_justification="Es un saludo",
+                core_argument="Saludo inicial",
+                weak_point_exposed="",
+                raw_response="Hola. Estoy listo.",
+            )
+            assert result == "OK"
+            assert holder["response"] == "Hola. Estoy listo."
+        finally:
+            _friction_required_level.reset(token_level)
+            _friction_captured_response.reset(token_resp)
+
+
+class TestGetResponseWithFriction:
+    """Tests for get_response when FrictionEngine is active."""
+
+    def _setup_runner(self, neibot_service: NeibotService, response_text: str) -> None:
+        """Helper to configure the ADK Runner mock."""
+        mock_session = MagicMock()
+        mock_session.id = "test-session"
+        cast(
+            Mock, neibot_service.session_service.create_session
+        ).return_value = mock_session
+
+    @pytest.mark.asyncio
+    async def test_friction_engine_none_uses_existing_flow(
+        self, neibot_service: NeibotService
+    ) -> None:
+        """When friction_engine is None, behavior is identical to current flow."""
+        assert neibot_service.friction_engine is None
+
+        mock_session = MagicMock()
+        mock_session.id = "test-session"
+        cast(
+            Mock, neibot_service.session_service.create_session
+        ).return_value = mock_session
+
+        mock_event = MagicMock()
+        mock_event.is_final_response.return_value = True
+        mock_part = MagicMock()
+        mock_part.text = "Respuesta normal"
+        mock_event.content = MagicMock()
+        mock_event.content.parts = [mock_part]
+        mock_event.usage_metadata = None
+
+        with patch("app.services.NeibotService.neibot_service.Agent"):
+            with patch(
+                "app.services.NeibotService.neibot_service.Runner"
+            ) as MockRunner:
+                mock_runner = MockRunner.return_value
+
+                async def mock_run_async(*args, **kwargs):
+                    yield mock_event
+
+                mock_runner.run_async = mock_run_async
+
+                result = await neibot_service.get_response(
+                    [{"role": "user", "content": "Hola", "attachments": []}]
+                )
+
+        assert result == "Respuesta normal"
+
+    @pytest.mark.asyncio
+    async def test_captured_response_returned_when_tool_called(
+        self, logger: logging.Logger
+    ) -> None:
+        """When emit_friction_response is called, captured response is returned."""
+        service = _make_neibot_with_friction(logger)
+
+        mock_session = MagicMock()
+        mock_session.id = "test-session"
+        cast(Mock, service.session_service.create_session).return_value = mock_session
+
+        # Simulate the agent calling emit_friction_response internally by
+        # setting the ContextVar during the runner execution
+        mock_event = MagicMock()
+        mock_event.is_final_response.return_value = True
+        mock_event.content = None
+        mock_event.usage_metadata = None
+
+        with patch("app.services.NeibotService.neibot_service.Agent"):
+            with patch(
+                "app.services.NeibotService.neibot_service.Runner"
+            ) as MockRunner:
+                mock_runner = MockRunner.return_value
+
+                async def mock_run_async(*args, **kwargs):
+                    # Simulate the tool being called by the LLM:
+                    # mutate the shared holder dict (same object the parent holds)
+                    holder = _friction_captured_response.get()
+                    if holder is not None:
+                        holder["response"] = "Respuesta capturada via tool"
+                    yield mock_event
+
+                mock_runner.run_async = mock_run_async
+
+                result = await service.get_response(
+                    [
+                        {
+                            "role": "user",
+                            "content": "Tengo un problema con mi arquitectura de microservicios",
+                            "attachments": [],
+                        }
+                    ]
+                )
+
+        assert result == "Respuesta capturada via tool"
+
+    @pytest.mark.asyncio
+    async def test_fallback_returned_when_tool_not_called(
+        self, logger: logging.Logger
+    ) -> None:
+        """When emit_friction_response is NOT called, fallback is returned."""
+        service = _make_neibot_with_friction(logger)
+
+        mock_session = MagicMock()
+        mock_session.id = "test-session"
+        cast(Mock, service.session_service.create_session).return_value = mock_session
+
+        mock_event = MagicMock()
+        mock_event.is_final_response.return_value = True
+        # LLM returns free text instead of calling the tool
+        mock_part = MagicMock()
+        mock_part.text = "Texto libre sin llamar la herramienta"
+        mock_event.content = MagicMock()
+        mock_event.content.parts = [mock_part]
+        mock_event.usage_metadata = None
+
+        with patch("app.services.NeibotService.neibot_service.Agent"):
+            with patch(
+                "app.services.NeibotService.neibot_service.Runner"
+            ) as MockRunner:
+                mock_runner = MockRunner.return_value
+
+                async def mock_run_async(*args, **kwargs):
+                    # Tool NOT called → _friction_captured_response remains None
+                    yield mock_event
+
+                mock_runner.run_async = mock_run_async
+
+                result = await service.get_response(
+                    [
+                        {
+                            "role": "user",
+                            "content": "Tengo un problema con mi arquitectura de microservicios en producción",
+                            "attachments": [],
+                        }
+                    ]
+                )
+
+        # Should be a fallback string, not the free text
+        assert result != "Texto libre sin llamar la herramienta"
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    @pytest.mark.asyncio
+    async def test_friction_contextvars_reset_after_request(
+        self, logger: logging.Logger
+    ) -> None:
+        """ContextVars are properly reset in the finally block."""
+        service = _make_neibot_with_friction(logger)
+
+        # Set sentinel values before the request
+        sentinel_holder: dict = {"response": "sentinel-before"}
+        outer_token_resp = _friction_captured_response.set(sentinel_holder)
+        outer_token_level = _friction_required_level.set(99)
+
+        mock_session = MagicMock()
+        mock_session.id = "test-session"
+        cast(Mock, service.session_service.create_session).return_value = mock_session
+
+        mock_event = MagicMock()
+        mock_event.is_final_response.return_value = True
+        mock_event.content = None
+        mock_event.usage_metadata = None
+
+        with patch("app.services.NeibotService.neibot_service.Agent"):
+            with patch(
+                "app.services.NeibotService.neibot_service.Runner"
+            ) as MockRunner:
+                mock_runner = MockRunner.return_value
+
+                async def mock_run_async(*args, **kwargs):
+                    yield mock_event
+
+                mock_runner.run_async = mock_run_async
+
+                await service.get_response(
+                    [
+                        {
+                            "role": "user",
+                            "content": "Test mensaje concreto para fricción",
+                            "attachments": [],
+                        }
+                    ]
+                )
+
+        # After request, outer context should be restored to the sentinel holder
+        assert _friction_captured_response.get() is sentinel_holder
+        assert _friction_required_level.get() == 99
+
+        # Cleanup
+        _friction_captured_response.reset(outer_token_resp)
+        _friction_required_level.reset(outer_token_level)
+
+    @pytest.mark.asyncio
+    async def test_friction_prefix_injected_into_user_message(
+        self, logger: logging.Logger
+    ) -> None:
+        """Friction prefix is appended to user message when friction_engine is active."""
+        service = _make_neibot_with_friction(logger)
+
+        mock_session = MagicMock()
+        mock_session.id = "test-session"
+        cast(Mock, service.session_service.create_session).return_value = mock_session
+
+        mock_event = MagicMock()
+        mock_event.is_final_response.return_value = True
+        mock_event.content = None
+        mock_event.usage_metadata = None
+
+        captured_message = None
+
+        with patch("app.services.NeibotService.neibot_service.Agent"):
+            with patch(
+                "app.services.NeibotService.neibot_service.Runner"
+            ) as MockRunner:
+                mock_runner = MockRunner.return_value
+
+                async def mock_run_async(*args, **kwargs):
+                    nonlocal captured_message
+                    captured_message = kwargs.get("new_message")
+                    holder = _friction_captured_response.get()
+                    if holder is not None:
+                        holder["response"] = "ok"
+                    yield mock_event
+
+                mock_runner.run_async = mock_run_async
+
+                await service.get_response(
+                    [{"role": "user", "content": "hola", "attachments": []}]
+                )
+
+        assert captured_message is not None
+        message_text = captured_message.parts[0].text
+        assert "[SISTEMA:" in message_text
+        assert "friction_level mínimo requerido" in message_text
+
+
+class TestCreateAgentWithFriction:
+    """Tests for _create_agent with FrictionEngine."""
+
+    def test_friction_tool_added_when_engine_present(
+        self, logger: logging.Logger
+    ) -> None:
+        """emit_friction_response tool is added when friction_engine is set."""
+        service = _make_neibot_with_friction(logger)
+
+        with patch("app.services.NeibotService.neibot_service.Agent") as MockAgent:
+            service._create_agent("gemini-pro")
+
+        call_kwargs = MockAgent.call_args[1]
+        tools = call_kwargs["tools"]
+        tool_names = [getattr(t, "__name__", str(t)) for t in tools]
+        assert "emit_friction_response" in tool_names
+
+    def test_friction_tool_absent_when_engine_none(
+        self, neibot_service: NeibotService
+    ) -> None:
+        """emit_friction_response tool is NOT added when friction_engine is None."""
+        assert neibot_service.friction_engine is None
+
+        with patch("app.services.NeibotService.neibot_service.Agent") as MockAgent:
+            neibot_service._create_agent("gemini-pro")
+
+        call_kwargs = MockAgent.call_args[1]
+        tools = call_kwargs["tools"]
+        tool_names = [getattr(t, "__name__", str(t)) for t in tools]
+        assert "emit_friction_response" not in tool_names
