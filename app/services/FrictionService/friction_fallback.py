@@ -5,7 +5,7 @@ la herramienta emit_friction_response o viola las restricciones de nivel.
 
 from __future__ import annotations
 
-import random
+import hashlib
 
 from app.services.FrictionService.friction_schema import FrictionConstraints
 
@@ -66,5 +66,9 @@ class FrictionFallbackGenerator:
         else:
             templates = self.TEMPLATES["desobediencia"]
 
-        template = random.choice(templates)  # nosec B311 — non-security template selector
+        fingerprint = f"{violation_reason}|{constraints.is_repeating}|{constraints.is_vague}|{core}"
+        idx = int(hashlib.sha256(fingerprint.encode("utf-8")).hexdigest(), 16) % len(
+            templates
+        )
+        template = templates[idx]
         return template.format(core=core)

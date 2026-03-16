@@ -1115,6 +1115,31 @@ class TestEmitFrictionResponseTool:
             _friction_required_level.reset(token_level)
             _friction_captured_response.reset(token_resp)
 
+    def test_friction_level_out_of_range_returns_violation(
+        self, logger: logging.Logger
+    ) -> None:
+        """Tool returns FrictionViolationError when friction_level is outside 0-3."""
+        service = _make_neibot_with_friction(logger)
+        tool = service._create_emit_friction_response_tool()
+
+        holder: dict = {"response": None}
+        token_level = _friction_required_level.set(0)
+        token_resp = _friction_captured_response.set(holder)
+        try:
+            result = tool(
+                friction_level=99,
+                friction_justification="whatever",
+                core_argument="whatever",
+                weak_point_exposed="whatever",
+                raw_response="respuesta",
+            )
+            assert "FrictionViolationError" in result
+            assert "fuera de rango" in result
+            assert holder["response"] is None
+        finally:
+            _friction_required_level.reset(token_level)
+            _friction_captured_response.reset(token_resp)
+
     def test_level_zero_does_not_require_weak_point(
         self, logger: logging.Logger
     ) -> None:

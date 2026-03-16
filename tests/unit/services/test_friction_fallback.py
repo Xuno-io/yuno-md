@@ -5,7 +5,10 @@ Unit tests for FrictionFallbackGenerator.
 import pytest
 
 from app.services.FrictionService.friction_fallback import FrictionFallbackGenerator
-from app.services.FrictionService.friction_schema import FrictionConstraints, FrictionLevel
+from app.services.FrictionService.friction_schema import (
+    FrictionConstraints,
+    FrictionLevel,
+)
 
 
 @pytest.fixture
@@ -48,7 +51,9 @@ class TestGenerate:
             violation_reason="tool_not_called",
         )
         # Should use repeticion template which includes the core
-        assert "necesito financiación para mi startup urgente" in result or len(result) > 0
+        assert (
+            "necesito financiación para mi startup urgente" in result or len(result) > 0
+        )
 
     def test_tool_not_called_with_vague_uses_vaguedad_template(
         self, generator: FrictionFallbackGenerator
@@ -115,7 +120,7 @@ class TestGenerate:
     ) -> None:
         """All templates must format without KeyError."""
         core = "test message"
-        for key, templates in generator.TEMPLATES.items():
+        for _key, templates in generator.TEMPLATES.items():
             for template in templates:
                 formatted = template.format(core=core)
                 assert isinstance(formatted, str)

@@ -6,7 +6,10 @@ from __future__ import annotations
 
 import re
 
-from app.services.FrictionService.friction_schema import FrictionConstraints, FrictionLevel
+from app.services.FrictionService.friction_schema import (
+    FrictionConstraints,
+    FrictionLevel,
+)
 
 # Strips "[Group: ...][User: ...]: " prefixes added by TelegramService for group chats
 _GROUP_PREFIX_RE = re.compile(r"^\[Group:[^\]]+\]\[User:[^\]]+\]:\s*")
@@ -97,8 +100,15 @@ class FrictionEngine:
             return False
         if not words:
             return False
-        first_word = words[0].strip(string.punctuation)
-        return first_word in GREETING_WORDS
+        normalized = [
+            w.strip(string.punctuation) for w in words if w.strip(string.punctuation)
+        ]
+        if not normalized:
+            return False
+        # Check two-word greetings first ("que tal", "qué tal")
+        if len(normalized) >= 2 and " ".join(normalized[:2]) in GREETING_WORDS:
+            return True
+        return normalized[0] in GREETING_WORDS
 
     def _detect_repetition(self, msg: str, history: list) -> bool:
         """
@@ -106,9 +116,7 @@ class FrictionEngine:
         de similitud de palabras en al menos 2 mensajes previos (últimos 5).
         """
         user_messages = [
-            m.get("content", "")
-            for m in history[-5:]
-            if m.get("role") == "user"
+            m.get("content", "") for m in history[-5:] if m.get("role") == "user"
         ]
         if not user_messages:
             return False

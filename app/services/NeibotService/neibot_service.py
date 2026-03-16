@@ -133,7 +133,11 @@ class NeibotService(NeibotServiceInterface):
         self.distill_model_name = distill_model_name or "gemini-2.5-pro"
         self.mcp_toolsets = mcp_toolsets or []
         self.friction_engine = friction_engine
-        self.friction_fallback = friction_fallback
+        self.friction_fallback = (
+            friction_fallback
+            if friction_fallback is not None
+            else (FrictionFallbackGenerator() if friction_engine is not None else None)
+        )
 
         # Load the distillation prompt from file
         self.distill_prompt = self._load_distill_prompt()
@@ -322,6 +326,12 @@ class NeibotService(NeibotServiceInterface):
                 corrijas y vuelvas a llamar la herramienta.
             """
             required = _friction_required_level.get()
+
+            if friction_level < 0 or friction_level > 3:
+                return (
+                    f"FrictionViolationError: friction_level={friction_level} fuera de rango (0-3). "
+                    "Usa 0=VALIDACION, 1=ANALISIS, 2=DESAFIO, 3=ANIQUILACION y vuelve a llamar."
+                )
 
             if friction_level < required:
                 return (
@@ -586,9 +596,11 @@ class NeibotService(NeibotServiceInterface):
                     self.logger.warning(
                         "emit_friction_response not called — using deterministic fallback"
                     )
-                    return self.friction_fallback.generate(  # type: ignore[union-attr]
+                    if self.friction_fallback is None or constraints is None:
+                        return "Error: configuración de fricción incompleta."
+                    return self.friction_fallback.generate(
                         user_message=last_message.get("content", ""),
-                        constraints=constraints,  # type: ignore[arg-type]
+                        constraints=constraints,
                         violation_reason="tool_not_called",
                     )
 

@@ -185,7 +185,7 @@ curl -s -u "$LANGFUSE_AUTH" -G \
 
 Use the MCP tools directly:
 
-```
+```text
 # List all prompts
 mcp__langfuse__listPrompts(page=1, limit=50)
 

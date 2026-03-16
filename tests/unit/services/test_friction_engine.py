@@ -37,6 +37,14 @@ class TestIsGreeting:
         result = engine.calculate_required_friction("buenas tardes", [])
         assert result.required_min == FrictionLevel.VALIDACION
 
+    def test_greeting_que_tal(self, engine: FrictionEngine) -> None:
+        result = engine.calculate_required_friction("qué tal?", [])
+        assert result.required_min == FrictionLevel.VALIDACION
+
+    def test_greeting_que_tal_no_accent(self, engine: FrictionEngine) -> None:
+        result = engine.calculate_required_friction("que tal", [])
+        assert result.required_min == FrictionLevel.VALIDACION
+
     def test_long_greeting_is_not_greeting(self, engine: FrictionEngine) -> None:
         # 5+ words — should not be treated as a greeting
         result = engine.calculate_required_friction(
@@ -66,9 +74,17 @@ class TestDetectRepetition:
     ) -> None:
         # Both user messages have >=0.6 similarity with the current message
         history: list[MessagePayload] = [
-            {"role": "user", "content": "mi startup necesita financiación urgente", "attachments": []},
+            {
+                "role": "user",
+                "content": "mi startup necesita financiación urgente",
+                "attachments": [],
+            },
             {"role": "assistant", "content": "respuesta", "attachments": []},
-            {"role": "user", "content": "mi startup necesita financiación urgente ya", "attachments": []},
+            {
+                "role": "user",
+                "content": "mi startup necesita financiación urgente ya",
+                "attachments": [],
+            },
             {"role": "assistant", "content": "respuesta", "attachments": []},
         ]
         result = engine.calculate_required_friction(
@@ -81,7 +97,11 @@ class TestDetectRepetition:
         history: list[MessagePayload] = [
             {"role": "user", "content": "hola qué tal estás hoy", "attachments": []},
             {"role": "assistant", "content": "bien", "attachments": []},
-            {"role": "user", "content": "cuéntame sobre python y sus ventajas", "attachments": []},
+            {
+                "role": "user",
+                "content": "cuéntame sobre python y sus ventajas",
+                "attachments": [],
+            },
         ]
         result = engine.calculate_required_friction(
             "prefiero usar rust para este proyecto concreto", history
@@ -92,7 +112,11 @@ class TestDetectRepetition:
         self, engine: FrictionEngine
     ) -> None:
         history: list[MessagePayload] = [
-            {"role": "user", "content": "necesito ayuda con mi startup", "attachments": []},
+            {
+                "role": "user",
+                "content": "necesito ayuda con mi startup",
+                "attachments": [],
+            },
             {"role": "assistant", "content": "respuesta", "attachments": []},
             {"role": "user", "content": "cuéntame sobre ventas", "attachments": []},
         ]
@@ -105,9 +129,21 @@ class TestDetectRepetition:
     def test_only_user_messages_count(self, engine: FrictionEngine) -> None:
         # Assistant messages should NOT count toward repetition
         history: list[MessagePayload] = [
-            {"role": "assistant", "content": "necesito ayuda con mi startup", "attachments": []},
-            {"role": "assistant", "content": "necesito ayuda con mi startup", "attachments": []},
-            {"role": "assistant", "content": "necesito ayuda con mi startup", "attachments": []},
+            {
+                "role": "assistant",
+                "content": "necesito ayuda con mi startup",
+                "attachments": [],
+            },
+            {
+                "role": "assistant",
+                "content": "necesito ayuda con mi startup",
+                "attachments": [],
+            },
+            {
+                "role": "assistant",
+                "content": "necesito ayuda con mi startup",
+                "attachments": [],
+            },
         ]
         result = engine.calculate_required_friction(
             "necesito ayuda con mi startup", history
@@ -136,7 +172,8 @@ class TestIsVague:
 
     def test_concrete_message_not_vague(self, engine: FrictionEngine) -> None:
         result = engine.calculate_required_friction(
-            "estoy migrando de PostgreSQL a DynamoDB y tengo dudas sobre el modelo de datos", []
+            "estoy migrando de PostgreSQL a DynamoDB y tengo dudas sobre el modelo de datos",
+            [],
         )
         assert result.is_vague is False
 
@@ -170,7 +207,8 @@ class TestDefaultDesafio:
 
     def test_concrete_message_is_desafio(self, engine: FrictionEngine) -> None:
         result = engine.calculate_required_friction(
-            "estoy construyendo una API REST con FastAPI y necesito entender los trade-offs", []
+            "estoy construyendo una API REST con FastAPI y necesito entender los trade-offs",
+            [],
         )
         assert result.required_min == FrictionLevel.DESAFIO
         assert result.is_repeating is False
