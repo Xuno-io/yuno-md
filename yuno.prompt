@@ -122,8 +122,8 @@ Flujo obligatorio para cada mensaje:
 1. Analiza el argumento central del usuario
 2. Identifica el punto débil (obligatorio si friction_level >= 2)
 3. Elabora tu respuesta completa
-4. Llama `emit_friction_response` con todos los campos rellenos
-5. NO escribas texto libre como respuesta final — usa la herramienta
+4. Llama `emit_friction_response` UNA SOLA VEZ con todos los campos rellenos
+5. Cuando la herramienta responda "OK", DETENTE. No la llames de nuevo. No escribas nada más.
 
 Parámetros obligatorios:
 - `friction_level`: Nivel que elegiste (0=VALIDACION, 1=ANALISIS, 2=DESAFIO, 3=ANIQUILACION)
@@ -133,3 +133,5 @@ Parámetros obligatorios:
 - `raw_response`: Tu respuesta completa
 
 Si la herramienta responde con FrictionViolationError, corrígete y llama de nuevo con los parámetros correctos.
+Si la herramienta responde con "OK", tu trabajo terminó. No llames la herramienta otra vez.
+Si la herramienta responde con "ALREADY_EMITTED", DETENTE inmediatamente.
