@@ -1164,6 +1164,42 @@ class TestEmitFrictionResponseTool:
             _friction_required_level.reset(token_level)
             _friction_captured_response.reset(token_resp)
 
+    def test_duplicate_call_returns_already_emitted(
+        self, logger: logging.Logger
+    ) -> None:
+        """Second call to emit_friction_response returns ALREADY_EMITTED and preserves first response."""
+        service = _make_neibot_with_friction(logger)
+        tool = service._create_emit_friction_response_tool()
+
+        holder: dict = {"response": None}
+        token_level = _friction_required_level.set(2)
+        token_resp = _friction_captured_response.set(holder)
+        try:
+            # First call succeeds
+            result1 = tool(
+                friction_level=2,
+                friction_justification="Primera vez",
+                core_argument="Argumento",
+                weak_point_exposed="Punto débil",
+                raw_response="Primera respuesta",
+            )
+            assert result1 == "OK"
+            assert holder["response"] == "Primera respuesta"
+
+            # Second call is rejected — first response preserved
+            result2 = tool(
+                friction_level=2,
+                friction_justification="Segunda vez",
+                core_argument="Argumento",
+                weak_point_exposed="Otro punto",
+                raw_response="Segunda respuesta que NO debe capturarse",
+            )
+            assert "ALREADY_EMITTED" in result2
+            assert holder["response"] == "Primera respuesta"
+        finally:
+            _friction_required_level.reset(token_level)
+            _friction_captured_response.reset(token_resp)
+
 
 class TestGetResponseWithFriction:
     """Tests for get_response when FrictionEngine is active."""

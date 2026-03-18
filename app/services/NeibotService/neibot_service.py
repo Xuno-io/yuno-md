@@ -75,6 +75,10 @@ RESPUESTA ORIGINAL A DESTILAR:
 # Application name for ADK sessions
 ADK_APP_NAME = "yunoai"
 
+# Maximum number of LLM round-trips before we force-stop the agent loop.
+# Prevents runaway tool-call loops (e.g. emit_friction_response called repeatedly).
+MAX_AGENT_ITERATIONS = 25
+
 
 class NeibotService(NeibotServiceInterface):
     """
@@ -180,11 +184,21 @@ class NeibotService(NeibotServiceInterface):
         )
 
         final_response = ""
+        iteration = 0
         async for event in runner.run_async(
             user_id=user_id,
             session_id=session.id,
             new_message=new_message,
         ):
+            iteration += 1
+            if iteration > MAX_AGENT_ITERATIONS:
+                self.logger.warning(
+                    "Agent loop hit MAX_AGENT_ITERATIONS (%d) — aborting",
+                    MAX_AGENT_ITERATIONS,
+                )
+                raise TimeoutError(
+                    f"Agent exceeded MAX_AGENT_ITERATIONS ({MAX_AGENT_ITERATIONS})"
+                )
             if event.is_final_response():
                 if event.content and event.content.parts:
                     for part in event.content.parts:
@@ -351,6 +365,13 @@ class NeibotService(NeibotServiceInterface):
             # (set() on a ContextVar only affects the current Task's copy of the context.)
             holder = _friction_captured_response.get()
             if holder is not None:
+                if holder.get("response") is not None:
+                    # Tool already succeeded — reject duplicate calls to break the loop.
+                    return (
+                        "ALREADY_EMITTED: Ya emitiste tu respuesta. "
+                        "NO llames esta herramienta de nuevo. "
+                        "Responde con un texto breve como 'Respuesta emitida.' para finalizar."
+                    )
                 holder["response"] = raw_response
             return "OK"
 
@@ -572,6 +593,8 @@ class NeibotService(NeibotServiceInterface):
             new_message = types.Content(role="user", parts=parts)
 
             # Run the agent with retry on 429 and timeout protection
+            timed_out = False
+            final_response = ""
             try:
                 async with asyncio.timeout(300):
                     final_response = await self._execute_runner(
@@ -581,18 +604,17 @@ class NeibotService(NeibotServiceInterface):
                         new_message=new_message,
                     )
             except TimeoutError:
+                timed_out = True
                 self.logger.error("ADK runner execution timed out")
-                return "I apologize, but this request is taking longer than expected. Please try again."
 
-            # Check if emit_friction_response was called
+            # Check if emit_friction_response captured a response (even on timeout —
+            # the tool may have succeeded before the loop exceeded its limits).
             if self.friction_engine:
                 holder = _friction_captured_response.get()
                 captured = holder.get("response") if holder else None
                 if captured is not None:
-                    # Tool was called and validated — use the captured response
                     return captured
                 else:
-                    # Tool was NOT called — LLM disobeyed the protocol
                     self.logger.warning(
                         "emit_friction_response not called — using deterministic fallback"
                     )
@@ -603,6 +625,9 @@ class NeibotService(NeibotServiceInterface):
                         constraints=constraints,
                         violation_reason="tool_not_called",
                     )
+
+            if timed_out:
+                return "I apologize, but this request is taking longer than expected. Please try again."
 
             if not final_response:
                 self.logger.warning("ADK returned empty response")
